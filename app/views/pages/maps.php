@@ -1,0 +1,14 @@
+<?php
+function page_maps(array $u):void {
+ $points=[];
+ foreach(rows(is_manager($u)?"SELECT id,legal_name name,city,latitude,longitude,status FROM suppliers WHERE status IN ('verified','pending')":"SELECT id,legal_name name,city,latitude,longitude,status FROM suppliers WHERE status='verified'") as $p)$points[]=['name'=>$p['name'],'city'=>$p['city'],'lat'=>(float)$p['latitude'],'lng'=>(float)$p['longitude'],'kind'=>$p['status']==='pending'?'PT Menunggu Verifikasi':'PT Pemasok'];
+ foreach(rows("SELECT id,name,city,latitude,longitude FROM cooperatives WHERE status='verified' AND latitude IS NOT NULL AND longitude IS NOT NULL") as $p)$points[]=['name'=>$p['name'],'city'=>$p['city'],'lat'=>(float)$p['latitude'],'lng'=>(float)$p['longitude'],'kind'=>'Koperasi Anak'];
+ $total=(int)val("SELECT COUNT(*) FROM cooperatives WHERE status='verified'");
+ ?><div class="row g-3 mb-4"><div class="col-md-4"><?php kpi('Pin lokasi terverifikasi',count($points),'map-pin');?></div><div class="col-md-4"><?php kpi('Total koperasi valid',$total,'network');?></div><div class="col-md-4"><?php kpi('Jaringan PT valid',(int)val("SELECT COUNT(*) FROM suppliers WHERE status='verified'"),'building');?></div></div>
+<div class="panel panel-pad"><div class="section-title"><h5>Peta persebaran mitra CocoLink</h5><span class="chip">OpenStreetMap / Leaflet</span></div><div class="notice mb-3">Pin PT ditampilkan setelah diverifikasi. Koperasi anak hanya tampil jika koordinat telah diisi dan diverifikasi. Peta membutuhkan internet untuk memuat tile.</div><div id="map" class="map-box"></div><div class="helper mt-3">Hijau: PT terverifikasi · Kuning: PT menunggu (khusus admin) · Biru: Koperasi anak · Koordinat dapat diperbaiki melalui pemutakhiran profil oleh pengelola pada pengembangan berikutnya.</div></div>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzxGJ+CEV5D/3fDPn6h4uPR40=" crossorigin=""><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script><script>
+const pts=<?=json_encode($points,JSON_HEX_TAG|JSON_HEX_AMP|JSON_HEX_APOS|JSON_HEX_QUOT)?>;
+if(window.L){const map=L.map('map').setView([-2.7,118],5);L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap contributors'}).addTo(map);const marks=[];pts.forEach(p=>{const m=L.circleMarker([p.lat,p.lng],{radius:9,color:p.kind==='PT Pemasok'?'#155e46':(p.kind==='PT Menunggu Verifikasi'?'#a88b28':'#2478b4'),weight:2,fillOpacity:.8}).addTo(map);const d=document.createElement('div');d.textContent=p.kind+' · '+p.name+' · '+p.city;m.bindPopup(d);marks.push(m)});if(marks.length)map.fitBounds(L.featureGroup(marks).getBounds().pad(.25));}
+else document.getElementById('map').textContent='Peta gagal dimuat. Pastikan koneksi internet tersedia.';
+</script>
+<?php }
