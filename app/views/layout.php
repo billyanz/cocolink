@@ -2,18 +2,19 @@
 declare(strict_types=1);
 
 function render_layout(string $page, array $u, callable $contentRenderer): void {
+    // PEMISAHAN MENU SIDEBAR PRESISI SESUAI PERAN AKUN
     $menuItems = [
         'dashboard'    => ['label' => 'Dashboard Utama', 'icon' => 'bi-speedometer2', 'roles' => ['super_admin', 'induk', 'supplier', 'coop', 'buyer', 'driver']],
         'maps'         => ['label' => 'Peta Jaringan Mitra', 'icon' => 'bi-map', 'roles' => ['super_admin', 'induk', 'supplier', 'coop', 'buyer', 'driver']],
-        'verification' => ['label' => 'Verifikasi Mitra', 'icon' => 'bi-shield-check', 'roles' => ['super_admin', 'induk']],
+        'verification' => ['label' => 'Verifikasi Koperasi Binaan', 'icon' => 'bi-shield-check', 'roles' => ['super_admin', 'induk', 'supplier']],
+        'accounts'     => ['label' => 'Manajemen Akun Koperasi', 'icon' => 'bi-people', 'roles' => ['super_admin', 'induk', 'supplier']],
         'batches'      => ['label' => 'Pasokan Limbah PT', 'icon' => 'bi-box-seam', 'roles' => ['super_admin', 'induk', 'supplier']],
-        'allocations'  => ['label' => 'Alokasi Bahan Mentah', 'icon' => 'bi-arrow-left-right', 'roles' => ['super_admin', 'induk', 'coop', 'supplier']],
-        'products'     => ['label' => 'Produk Olahan & Stok', 'icon' => 'bi-shop', 'roles' => ['super_admin', 'induk', 'coop']],
+        'allocations'  => ['label' => 'Alokasi Bahan Mentah', 'icon' => 'bi-arrow-left-right', 'roles' => ['super_admin', 'induk', 'supplier', 'coop']],
+        'products'     => ['label' => 'Produk Olahan Koperasi', 'icon' => 'bi-shop', 'roles' => ['super_admin', 'induk', 'supplier', 'coop']],
         'catalog'      => ['label' => 'Katalog Industri B2B', 'icon' => 'bi-cart-check', 'roles' => ['buyer']],
-        'orders'       => ['label' => 'Pesanan Industri', 'icon' => 'bi-receipt', 'roles' => ['super_admin', 'induk', 'buyer']],
+        'orders'       => ['label' => 'Pesanan Industri', 'icon' => 'bi-receipt', 'roles' => ['super_admin', 'induk', 'supplier', 'coop', 'buyer']],
         'shipments'    => ['label' => 'Logistik & Driver Armada', 'icon' => 'bi-truck', 'roles' => ['super_admin', 'induk', 'supplier', 'coop', 'driver', 'buyer']],
-        'reports'      => ['label' => 'Laporan Lanjutan', 'icon' => 'bi-file-earmark-bar-graph', 'roles' => ['super_admin', 'induk']],
-        'accounts'     => ['label' => 'Manajemen Akun', 'icon' => 'bi-people', 'roles' => ['super_admin']],
+        'reports'      => ['label' => 'Laporan Lanjutan', 'icon' => 'bi-file-earmark-bar-graph', 'roles' => ['super_admin']],
         'audit'        => ['label' => 'Audit Log Aktivitas', 'icon' => 'bi-journal-text', 'roles' => ['super_admin']],
     ];
 
@@ -26,7 +27,6 @@ function render_layout(string $page, array $u, callable $contentRenderer): void 
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>CoCoLink &bull; Circular Supply Chain Network</title>
     
-    <!-- CDN Bootstrap 5 & Bootstrap Icons -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.2/font/bootstrap-icons.min.css">
     
@@ -38,7 +38,7 @@ function render_layout(string $page, array $u, callable $contentRenderer): void 
             --coco-sidebar-bg: #113828;
         }
         body {
-            font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
             background-color: var(--coco-bg);
             color: #2D3748;
         }
@@ -100,7 +100,6 @@ function render_layout(string $page, array $u, callable $contentRenderer): void 
 <body>
 
 <div class="d-flex">
-    <!-- SIDEBAR NAVIGASI UTAMA -->
     <aside class="sidebar p-3 d-flex flex-column">
         <div class="d-flex align-items-center gap-2 px-2 py-3 mb-3 border-bottom border-white border-opacity-10">
             <div class="bg-success bg-gradient text-white rounded-circle p-2 d-flex align-items-center justify-content-center" style="width: 38px; height: 38px;">
@@ -108,12 +107,16 @@ function render_layout(string $page, array $u, callable $contentRenderer): void 
             </div>
             <div>
                 <h6 class="fw-bold text-white mb-0" style="letter-spacing: 0.5px;">CoCoLink</h6>
-                <small class="text-white-50" style="font-size: 0.72rem;">CIRCULAR NETWORK</small>
+                <small class="text-white-50" style="font-size: 0.72rem;">
+                    <?= $u['role'] === 'super_admin' ? 'MASTER PLATFORM' : 'REGIONAL PT INDUK' ?>
+                </small>
             </div>
         </div>
 
         <nav class="flex-grow-1">
-            <div class="text-white-50 small fw-bold px-2 mb-2 text-uppercase" style="font-size:0.7rem; letter-spacing:1px;">Menu Utama</div>
+            <div class="text-white-50 small fw-bold px-2 mb-2 text-uppercase" style="font-size:0.7rem; letter-spacing:1px;">
+                <?= $u['role'] === 'super_admin' ? 'Menu Master System' : 'Menu Operasional PT' ?>
+            </div>
             <?php foreach ($menuItems as $key => $item): ?>
                 <?php if (in_array($u['role'], $item['roles'], true)): ?>
                     <a href="<?= url($key) ?>" class="nav-link-coco <?= $page === $key ? 'active' : '' ?>">
@@ -136,9 +139,7 @@ function render_layout(string $page, array $u, callable $contentRenderer): void 
         </div>
     </aside>
 
-    <!-- AREA KONTEN UTAMA -->
     <main class="main-content flex-grow-1">
-        <!-- TOP NAVBAR HEADER -->
         <header class="top-navbar d-flex justify-content-between align-items-center">
             <div class="d-flex align-items-center gap-2">
                 <span class="text-muted small">Operasional /</span>
@@ -153,20 +154,18 @@ function render_layout(string $page, array $u, callable $contentRenderer): void 
             </div>
         </header>
 
-        <!-- NOTIFIKASI FLASH MESSAGE -->
         <?php if ($flash): ?>
             <div class="alert alert-<?= e($flash['kind']) ?> alert-dismissible fade show shadow-sm border-0 mb-4" style="border-radius:12px;">
                 <i class="bi bi-info-circle-fill me-2"></i><?= e($flash['message']) ?>
-                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
             </div>
         <?php endif; ?>
 
-        <!-- RENDER HALAMAN SPESIFIK -->
         <?php $contentRenderer(); ?>
     </main>
 </div>
 
-<script href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
 <?php

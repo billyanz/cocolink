@@ -16,21 +16,17 @@ function page_maps(array $u): void {
             'lat'    => (float)$s['latitude'],
             'lng'    => (float)$s['longitude'],
             'status' => $s['status'],
-            'info'   => 'NIB: ' . $s['nib'] . ' | Koperasi Valid: ' . $s['verified_coops']
+            'info'   => 'NIB: ' . $s['nib'] . ' | Koperasi Binaan: ' . $s['verified_coops']
         ];
     }
 
-    $baseLat = -6.9175;
-    $baseLng = 107.6191;
-    foreach ($coops as $idx => $c) {
-        $lat = $baseLat + (($idx + 1) * 0.025);
-        $lng = $baseLng + (($idx + 1) * 0.035);
+    foreach ($coops as $c) {
         $points[] = [
             'type'   => 'coop',
             'name'   => $c['name'],
             'city'   => $c['city'] . ', Jawa Barat',
-            'lat'    => $lat,
-            'lng'    => $lng,
+            'lat'    => $c['latitude'] ? (float)$c['latitude'] : -6.9175,
+            'lng'    => $c['longitude'] ? (float)$c['longitude'] : 107.6191,
             'status' => 'verified',
             'info'   => 'PT Utama: ' . $c['legal_name'] . ' | Spesialis: ' . $c['raw_name']
         ];
@@ -47,7 +43,7 @@ function page_maps(array $u): void {
             <div class="p-3 rounded-circle bg-white bg-opacity-20 fs-3 text-white"><i class="bi bi-geo-alt-fill"></i></div>
             <div>
                 <h5 class="fw-bold mb-1 text-white">Peta Sebaran Jaringan Ekosistem Mitra</h5>
-                <p class="mb-0 small text-white-50">Visualisasi geospasial lokasi PT Pemasok Limbah Utama dan Koperasi Anak Olahan di Indonesia.</p>
+                <p class="mb-0 small text-white-50">Visualisasi Geospasial PT Pemasok Utama (Ikon Hijau) & Koperasi Anak Binaan (Ikon Biru).</p>
             </div>
         </div>
     </div>
@@ -56,10 +52,10 @@ function page_maps(array $u): void {
 <!-- KPI SUMMARY MAPS -->
 <div class="row g-3 mb-4">
     <div class="col-md-4">
-        <?php kpi('PT Pemasok Terpeta', count($suppliers), 'bi-building', 'text-success bg-success'); ?>
+        <?php kpi('PT Pemasok Utama (Ikon Hijau)', count($suppliers), 'bi-building', 'text-success bg-success'); ?>
     </div>
     <div class="col-md-4">
-        <?php kpi('Koperasi Anak Terpeta', count($coops), 'bi-shop', 'text-info bg-info'); ?>
+        <?php kpi('Koperasi Anak Binaan (Ikon Biru)', count($coops), 'bi-shop', 'text-primary bg-primary'); ?>
     </div>
     <div class="col-md-4">
         <?php kpi('Total Titik Koordinat', count($points), 'bi-pin-map-fill', 'text-warning bg-warning'); ?>
@@ -69,30 +65,30 @@ function page_maps(array $u): void {
 <div class="card border-0 shadow-sm mb-4" style="border-radius:16px; overflow:hidden;">
     <div class="card-body p-0">
         <div class="p-3 border-bottom d-flex justify-content-between align-items-center bg-white">
-            <div class="fw-bold text-dark"><i class="bi bi-map me-2" style="color:#164B35"></i>Peta Interaktif OpenStreetMap</div>
+            <div class="fw-bold text-dark"><i class="bi bi-map me-2" style="color:#164B35"></i>Peta Interaktif OpenStreetMap CoCoLink</div>
             <div class="d-flex gap-2">
-                <span class="badge bg-success"><i class="bi bi-geo-alt-fill me-1"></i>PT Verified</span>
-                <span class="badge bg-warning text-dark"><i class="bi bi-geo-alt-fill me-1"></i>PT Pending</span>
-                <span class="badge bg-info"><i class="bi bi-geo-alt-fill me-1"></i>Koperasi Anak</span>
+                <span class="badge bg-success px-3 py-2"><i class="bi bi-building me-1"></i>PT Induk (Ikon Hijau)</span>
+                <span class="badge bg-primary px-3 py-2"><i class="bi bi-shop me-1"></i>Koperasi Anak (Ikon Biru)</span>
             </div>
         </div>
-        <div id="cocoMap" style="height: 520px; width: 100%; z-index: 1;"></div>
+        <div id="cocoMap" style="height: 540px; width: 100%; z-index: 1;"></div>
     </div>
 </div>
 
 <script>
 document.addEventListener('DOMContentLoaded', function() {
-    var map = L.map('cocoMap').setView([-6.9175, 107.6191], 9);
+    var map = L.map('cocoMap').setView([-6.2000, 106.8166], 8);
 
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         maxZoom: 19,
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> CoCoLink'
+        attribution: '&copy; OpenStreetMap CoCoLink Network'
     }).addTo(map);
 
     var points = <?= json_encode($points) ?>;
     var bounds = [];
 
     points.forEach(function(pt) {
+        // Marker Hijau untuk PT Induk, Marker Biru untuk Koperasi Anak
         var color = pt.type === 'coop' ? 'blue' : (pt.status === 'verified' ? 'green' : 'gold');
         var iconUrl = 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-' + color + '.png';
 
@@ -105,16 +101,21 @@ document.addEventListener('DOMContentLoaded', function() {
             shadowSize: [41, 41]
         });
 
-        var pop = '<strong>' + pt.name + '</strong><br>' +
-                  '<small class="text-muted">' + pt.city + '</small><br>' +
-                  '<span class="badge bg-light text-dark border mt-1">' + pt.info + '</span>';
+        var iconHeader = pt.type === 'coop' ? '<span class="badge bg-primary mb-1"><i class="bi bi-shop me-1"></i>Koperasi Anak</span>' : '<span class="badge bg-success mb-1"><i class="bi bi-building me-1"></i>PT Pemasok Utama</span>';
 
-        var m = L.marker([pt.lat, pt.lng], {icon: customIcon}).addTo(map).bindPopup(pop);
+        var pop = '<div style="min-width:200px;">' +
+                  iconHeader +
+                  '<strong class="text-dark d-block fs-6">' + pt.name + '</strong>' +
+                  '<small class="text-muted d-block mb-2"><i class="bi bi-geo-alt me-1"></i>' + pt.city + '</small>' +
+                  '<div class="p-2 rounded bg-light border text-dark small mb-0">' + pt.info + '</div>' +
+                  '</div>';
+
+        L.marker([pt.lat, pt.lng], {icon: customIcon}).addTo(map).bindPopup(pop);
         bounds.push([pt.lat, pt.lng]);
     });
 
     if (bounds.length > 0) {
-        map.fitBounds(bounds, {padding: [40, 40]});
+        map.fitBounds(bounds, {padding: [50, 50]});
     }
 });
 </script>

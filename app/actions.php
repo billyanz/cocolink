@@ -1,462 +1,512 @@
 <?php
-require_once __DIR__ . '/bootstrap.php';
+declare(strict_types=1);
 
-function process_action(): void {
-    if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST') return;
-    
-    require_csrf();
-    $action = (string)($_POST['action'] ?? '');
-    $actor  = current_user();
+function parse_gmaps_url(string $url, string $city = ''): array {
+    $url = trim($url);
+    $lat = -6.2000000;
+    $lng = 106.8166666;
 
-    if (!$actor && !in_array($action, ['register_supplier', 'register_buyer', 'login'], true)) {
-        throw new RuntimeException('Silakan masuk terlebih dahulu.');
+    if (preg_match('/@(-?\d+\.\d+),(-?\d+\.\d+)/', $url, $matches)) {
+        return [(float)$matches[1], (float)$matches[2]];
+    }
+    if (preg_match('/q=(-?\d+\.\d+),(-?\d+\.\d+)/', $url, $matches)) {
+        return [(float)$matches[1], (float)$matches[2]];
+    }
+    if (preg_match('/(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)/', $url, $matches)) {
+        return [(float)$matches[1], (float)$matches[2]];
     }
 
-    switch ($action) {
-        case 'logout':
-            audit((int)$actor['id'], 'logout', 'user', (int)$actor['id']);
-            unset($_SESSION['uid']);
-            session_regenerate_id(true);
-            flash('Anda telah keluar dari sistem.');
-            redirect('home');
+    return [$lat, $lng];
+}
 
+function process_action(): void {
+    require_csrf();
+    $u = current_user();
+    $act = (string)($_POST['action'] ?? '');
+
+    switch ($act) {
         case 'login':
-            $email = strtolower(required_str('email', 190));
-            $pw    = (string)($_POST['password'] ?? '');
-            $u     = one('SELECT * FROM users WHERE email=?', [$email]);
-            if (!$u || !(int)$u['is_active'] || !password_verify($pw, $u['password_hash'])) {
-                throw new RuntimeException('Email/password salah atau akun dinonaktifkan.');
+            $email = required_str('email');
+            $pass  = (string)($_POST['password'] ?? '');
+            $user  = one('SELECT * FROM users WHERE email=?', [$email]);
+
+            if (!$user || !password_verify($pass, $user['password_hash'])) {
+                throw new RuntimeException('Kombinasi email atau kata sandi tidak cocok.');
             }
-            session_regenerate_id(true);
-            $_SESSION['uid'] = (int)$u['id'];
-            audit((int)$u['id'], 'login', 'user', (int)$u['id']);
-            flash('Selamat datang di CoCoLink.');
-            redirect();
+            if (!(int)$user['is_active']) {
+                throw new RuntimeException('Akun Anda saat ini dinonaktifkan oleh administrator.');
+            }
+
+            $_SESSION['uid'] = (int)$user['id'];
+            audit((int)$user['id'], 'login', 'users', (int)$user['id'], 'Login berhasil ke platform Jabodetabek');
+            flash('Selamat datang kembali, ' . $user['name'] . '!');
+            redirect('dashboard');
+
+        case 'logout':
+            if ($u) {
+                audit($u['id'], 'logout', 'users', $u['id'], 'Pengguna keluar sistem');
+            }
+            unset($_SESSION['uid']);
+            session_destroy();
+            redirect('login');
 
         case 'register_supplier':
-            $name  = required_str('name', 120);
-            $email = strtolower(required_str('email', 190));
-            $pw    = (string)($_POST['password'] ?? '');
-            if (!filter_var($email, FILTER_VALIDATE_EMAIL) || strlen($pw) < 8) {
-                throw new RuntimeException('Email tidak valid atau password kurang dari 8 karakter.');
+            $name    = required_str('name');
+            $email   = required_str('email');
+            $pass    = required_str('password');
+            $legal   = required_str('legal_name');
+            $nib     = required_str('nib');
+            $prov    = required_str('province');
+            $city    = required_str('city');
+            $addr    = required_str('address');
+            $mapUrl  = trim((string)($_POST['gmaps_url'] ?? ''));
+
+            if (val('SELECT COUNT(*) FROM users WHERE email=?', [$email]) > 0) {
+                throw new RuntimeException('Alamat email tersebut sudah terdaftar.');
             }
-            $legal    = required_str('legal_name', 160);
-            $nib      = required_str('nib', 30);
-            $city     = required_str('city', 90);
-            $province = required_str('province', 90);
-            $address  = required_str('address', 1000);
-            $lat      = coord('latitude', -90, 90);
-            $lng      = coord('longitude', -180, 180);
-
-            $names       = $_POST['coop_name'] ?? [];
-            $regions     = $_POST['coop_city'] ?? [];
-            $addresses   = $_POST['coop_address'] ?? [];
-            $specialties = $_POST['coop_type'] ?? [];
-
-            if (!is_array($names) || !is_array($regions) || !is_array($specialties) || count($names) < 5 || count($names) > 20) {
-                throw new RuntimeException('Minimal 5 dan maksimal 20 Koperasi Anak harus diajukan.');
+            if (val('SELECT COUNT(*) FROM suppliers WHERE nib=?', [$nib]) > 0) {
+                throw new RuntimeException('Nomor NIB PT Perusahaan sudah terdaftar.');
             }
 
-            $prepared = [];
-            foreach ($names as $i => $n) {
-                $n    = trim((string)$n);
-                $reg  = trim((string)($regions[$i] ?? ''));
-                $addr = trim((string)($addresses[$i] ?? ''));
-                $type = (int)($specialties[$i] ?? 0);
-                if ($n === '' || uni_len($n) > 160 || $reg === '' || uni_len($reg) > 90 || $addr === '' || uni_len($addr) > 1000 || !val('SELECT id FROM raw_types WHERE id=?', [$type])) {
-                    throw new RuntimeException('Data Koperasi Anak ke-' . ($i + 1) . ' belum lengkap.');
+            [$lat, $lng] = parse_gmaps_url($mapUrl, $city);
+
+            $coopNames = $_POST['coop_name'] ?? [];
+            $coopCities = $_POST['coop_city'] ?? [];
+            $coopAddrs = $_POST['coop_address'] ?? [];
+            $coopTypes = $_POST['coop_raw_type_id'] ?? [];
+            $coopMaps  = $_POST['coop_gmaps_url'] ?? [];
+
+            $validCoops = 0;
+            foreach ($coopNames as $idx => $cName) {
+                if (!empty(trim((string)$cName))) {
+                    $validCoops++;
                 }
-                $prepared[] = ['name' => $n, 'city' => $reg, 'address' => $addr, 'type' => $type];
             }
 
-            if (count(array_unique(array_map(fn($c) => uni_lower($c['name']), $prepared))) < 5) {
-                throw new RuntimeException('Minimal 5 Koperasi Anak dengan nama berbeda.');
+            if ($validCoops < 5) {
+                throw new RuntimeException('Syarat Pendaftaran PT Induk Regional: Wajib mendaftarkan minimal 5 Koperasi Anak Sektor Wilayah di Jabodetabek!');
             }
 
             db()->beginTransaction();
             try {
-                sql('INSERT INTO suppliers(legal_name,nib,province,city,address,latitude,longitude) VALUES(?,?,?,?,?,?,?)', [$legal, $nib, $province, $city, $address, $lat, $lng]);
-                $sid = (int)db()->lastInsertId();
-                sql("INSERT INTO users(name,email,password_hash,role,supplier_id) VALUES(?,?,?,'supplier',?)", [$name, $email, password_hash($pw, PASSWORD_DEFAULT), $sid]);
-                $uid = (int)db()->lastInsertId();
-                foreach ($prepared as $c) {
-                    sql('INSERT INTO cooperatives(supplier_id,name,province,city,address,specialty_raw_type_id) VALUES(?,?,?,?,?,?)', [$sid, $c['name'], $province, $c['city'], $c['address'], $c['type']]);
-                }
-                audit($uid, 'register_supplier', 'supplier', $sid, 'Mencalonkan ' . count($prepared) . ' Koperasi Anak');
-                db()->commit();
-            } catch (Throwable $ex) {
-                db()->rollBack();
-                throw $ex;
-            }
-            flash('Pendaftaran PT diterima. Koperasi Induk akan memverifikasi minimal 5 mitra Koperasi Anak.');
-            redirect('login');
-
-        case 'register_buyer':
-            $name  = required_str('name', 120);
-            $email = strtolower(required_str('email', 190));
-            $pw    = (string)($_POST['password'] ?? '');
-            if (!filter_var($email, FILTER_VALIDATE_EMAIL) || strlen($pw) < 8) {
-                throw new RuntimeException('Email tidak valid atau password kurang dari 8 karakter.');
-            }
-            db()->beginTransaction();
-            try {
-                $buyerType = required_str('buyer_type', 20);
-                if (!in_array($buyerType, ['industry', 'collector'], true)) {
-                    throw new RuntimeException('Jenis pembeli tidak valid.');
-                }
-                sql('INSERT INTO buyer_profiles(company_name,buyer_type,nib,address,city) VALUES(?,?,?,?,?)', [
-                    required_str('company_name', 160), $buyerType, trim((string)($_POST['nib'] ?? '')) ?: null, required_str('address', 1000), required_str('city', 90)
+                sql("INSERT INTO suppliers(legal_name, nib, province, city, address, latitude, longitude, status) 
+                     VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')", [
+                    $legal, $nib, $prov, $city, $addr, $lat, $lng
                 ]);
-                $bid = (int)db()->lastInsertId();
-                sql("INSERT INTO users(name,email,password_hash,role,buyer_id) VALUES(?,?,?,'buyer',?)", [$name, $email, password_hash($pw, PASSWORD_DEFAULT), $bid]);
-                audit((int)db()->lastInsertId(), 'register_buyer', 'buyer', $bid);
-                db()->commit();
-            } catch (Throwable $ex) {
-                db()->rollBack();
-                throw $ex;
-            }
-            flash('Pendaftaran pembeli berhasil. Tunggu verifikasi Koperasi Induk.');
-            redirect('login');
+                $sid = (int)db()->lastInsertId();
 
-        case 'verify_coop':
-            must_role(['super_admin', 'induk']);
-            $id     = post_id('id');
-            $status = required_str('status', 15);
-            if (!in_array($status, ['verified', 'rejected'], true)) throw new RuntimeException('Status tidak valid.');
+                $hash = password_hash($pass, PASSWORD_DEFAULT);
+                sql("INSERT INTO users(name, email, password_hash, role, supplier_id) VALUES (?, ?, ?, 'supplier', ?)", [
+                    $name, $email, $hash, $sid
+                ]);
+                $uid = (int)db()->lastInsertId();
+
+                foreach ($coopNames as $idx => $cName) {
+                    $cn = trim((string)$cName);
+                    if ($cn === '') continue;
+
+                    $cc = trim((string)($coopCities[$idx] ?? $city));
+                    $ca = trim((string)($coopAddrs[$idx] ?? $addr));
+                    $ct = (int)($coopTypes[$idx] ?? 1);
+                    $cm = trim((string)($coopMaps[$idx] ?? ''));
+
+                    [$cLat, $cLng] = parse_gmaps_url($cm, $cc);
+
+                    sql("INSERT INTO cooperatives(supplier_id, name, province, city, address, latitude, longitude, specialty_raw_type_id, status) 
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')", [
+                        $sid, $cn, $prov, $cc, $ca, $cLat, $cLng, $ct
+                    ]);
+                }
+
+                db()->commit();
+                audit($uid, 'register_supplier', 'suppliers', $sid, 'Pendaftaran PT Pemasok Regional Jabodetabek dan 5 Koperasi Sektor');
+                flash('Pendaftaran PT Pemasok berhasil diajukan! Menunggu verifikasi pengesahan dari Koperasi Induk Metropolitan.', 'success');
+                redirect('login');
+
+            } catch (Throwable $e) {
+                db()->rollBack();
+                throw $e;
+            }
+
+        case 'add_replacement_coop':
+            must_role(['super_admin', 'induk', 'supplier']);
+            $sid   = $u['supplier_id'] ?: post_id('supplier_id');
+            $name  = required_str('name');
+            $city  = required_str('city');
+            $addr  = required_str('address');
+            $type  = post_id('specialty_raw_type_id');
+            $mUrl  = trim((string)($_POST['gmaps_url'] ?? ''));
+
+            [$cLat, $cLng] = parse_gmaps_url($mUrl, $city);
+
+            sql("INSERT INTO cooperatives(supplier_id, name, province, city, address, latitude, longitude, specialty_raw_type_id, status) 
+                 VALUES (?, ?, 'Jabodetabek', ?, ?, ?, ?, ?, 'pending')", [
+                $sid, $name, $city, $addr, $cLat, $cLng, $type
+            ]);
+            $cid = (int)db()->lastInsertId();
+            audit($u['id'], 'add_replacement_coop', 'cooperatives', $cid, 'Penambahan Koperasi Anak Sektor pengganti');
+            flash('Koperasi Anak Sektor pengganti berhasil ditambahkan!');
+            redirect('verification');
+
+        case 'create_user':
+            must_role(['super_admin', 'induk', 'supplier']);
+            $name    = required_str('name');
+            $email   = required_str('email');
+            $pass    = required_str('password');
+            $role    = required_str('role');
+            $supplierId = filter_var($_POST['supplier_id'] ?? null, FILTER_VALIDATE_INT) ?: null;
+            $coopId     = filter_var($_POST['coop_id'] ?? null, FILTER_VALIDATE_INT) ?: null;
+
+            if (val('SELECT COUNT(*) FROM users WHERE email=?', [$email]) > 0) {
+                throw new RuntimeException('Alamat email tersebut sudah terdaftar.');
+            }
+
             db()->beginTransaction();
             try {
-                $coop = one('SELECT * FROM cooperatives WHERE id=? FOR UPDATE', [$id]);
-                if (!$coop) throw new RuntimeException('Koperasi tidak ditemukan.');
-                $parent = one('SELECT * FROM suppliers WHERE id=? FOR UPDATE', [$coop['supplier_id']]);
-                if ($parent['status'] === 'verified' && $coop['status'] === 'verified' && $status === 'rejected') {
-                    $n = (int)val("SELECT COUNT(*) FROM cooperatives WHERE supplier_id=? AND status='verified'", [$coop['supplier_id']]);
-                    if ($n <= 5) throw new RuntimeException('Koperasi tidak bisa ditolak karena PT akan memiliki kurang dari 5 koperasi valid.');
+                $buyerId = null;
+                if ($role === 'buyer') {
+                    // Otomatis buatkan profil Pembeli Industri jika role buyer diterbitkan
+                    $nib = 'BUY-' . date('Ymd') . '-' . rand(1000, 9999);
+                    sql("INSERT INTO buyer_profiles(company_name, buyer_type, nib, address, city, status) VALUES (?, 'industry', ?, 'Kawasan Industri Regional', 'Jakarta', 'verified')", [
+                        $name, $nib
+                    ]);
+                    $buyerId = (int)db()->lastInsertId();
                 }
-                sql('UPDATE cooperatives SET status=?,verified_by=? WHERE id=?', [$status, $actor['id'], $id]);
-                audit((int)$actor['id'], 'verify_coop', 'cooperative', $id, $status);
+
+                if ($u['role'] === 'supplier' || $u['role'] === 'induk') {
+                    if (!$coopId && $role === 'coop') {
+                        throw new RuntimeException('Pilih Koperasi Anak Sektor Wilayah yang akan dibuatkan akun login.');
+                    }
+                    $supplierId = $u['supplier_id'];
+                }
+
+                $hash = password_hash($pass, PASSWORD_DEFAULT);
+                sql("INSERT INTO users(name, email, password_hash, role, supplier_id, coop_id, buyer_id) VALUES (?, ?, ?, ?, ?, ?, ?)", [
+                    $name, $email, $hash, $role, $supplierId, $coopId, $buyerId
+                ]);
+                $newUid = (int)db()->lastInsertId();
+
                 db()->commit();
-            } catch (Throwable $ex) {
+                audit($u['id'], 'create_user', 'users', $newUid, 'Pembuatan akun pengguna baru peran ' . $role);
+                flash('Akun pengelola / pembeli berhasil diterbitkan!');
+                redirect('accounts');
+            } catch (Throwable $e) {
                 db()->rollBack();
-                throw $ex;
+                throw $e;
             }
-            flash('Status Koperasi Anak diperbarui.');
-            redirect('verification');
 
         case 'verify_supplier':
             must_role(['super_admin', 'induk']);
             $id     = post_id('id');
-            $status = required_str('status', 15);
-            if (!in_array($status, ['verified', 'rejected'], true)) throw new RuntimeException('Status tidak valid.');
+            $status = required_str('status');
+            
             db()->beginTransaction();
             try {
-                $supplier = one('SELECT * FROM suppliers WHERE id=? FOR UPDATE', [$id]);
-                if (!$supplier) throw new RuntimeException('PT tidak ditemukan.');
-                $count = (int)val("SELECT COUNT(*) FROM cooperatives WHERE supplier_id=? AND status='verified'", [$id]);
-                if ($status === 'verified' && $count < 5) throw new RuntimeException('PT baru bisa disetujui jika minimal 5 Koperasi Anak sudah terverifikasi (saat ini ' . $count . ').');
-                sql('UPDATE suppliers SET status=?,verified_by=?,verified_at=IF(?="verified",NOW(),NULL) WHERE id=?', [$status, $actor['id'], $status, $id]);
-                audit((int)$actor['id'], 'verify_supplier', 'supplier', $id, $status . '; koperasi valid=' . $count);
+                sql("UPDATE suppliers SET status=?, verified_by=?, verified_at=NOW() WHERE id=?", [$status, $u['id'], $id]);
+                if ($status === 'verified') {
+                    sql("UPDATE cooperatives SET status='verified', verified_by=? WHERE supplier_id=?", [$u['id'], $id]);
+                }
                 db()->commit();
-            } catch (Throwable $ex) {
+                audit($u['id'], 'verify_supplier', 'suppliers', $id, 'Verifikasi PT Pemasok & Koperasi Sektor ke ' . $status);
+                flash('Status verifikasi PT Pemasok Regional & 5 Koperasi Sektor berhasil disetujui Koperasi Induk!');
+                redirect('verification');
+            } catch (Throwable $e) {
                 db()->rollBack();
-                throw $ex;
+                throw $e;
             }
-            flash('Status PT Pemasok berhasil diperbarui.');
-            redirect('verification');
 
-        case 'verify_buyer':
-            must_role(['super_admin', 'induk']);
+        case 'verify_coop':
+            must_role(['super_admin', 'induk', 'supplier']);
             $id     = post_id('id');
-            $status = required_str('status', 15);
-            if (!in_array($status, ['verified', 'rejected'], true)) throw new RuntimeException('Status tidak valid.');
-            sql('UPDATE buyer_profiles SET status=? WHERE id=?', [$status, $id]);
-            audit((int)$actor['id'], 'verify_buyer', 'buyer', $id, $status);
-            flash('Verifikasi pembeli diperbarui.');
+            $status = required_str('status');
+
+            sql("UPDATE cooperatives SET status=?, verified_by=? WHERE id=?", [$status, $u['id'], $id]);
+            audit($u['id'], 'verify_coop', 'cooperatives', $id, 'Pembaruan verifikasi Koperasi Sektor ke ' . $status);
+            flash('Status verifikasi Koperasi Sektor Wilayah berhasil diperbarui.');
             redirect('verification');
 
-        case 'create_user':
-            must_role(['super_admin']);
-            $role = required_str('role', 20);
-            if (!in_array($role, ['super_admin', 'induk', 'supplier', 'coop', 'buyer', 'driver'], true)) throw new RuntimeException('Role tidak valid.');
-            $email = strtolower(required_str('email', 190));
-            $pw    = (string)($_POST['password'] ?? '');
-            if (!filter_var($email, FILTER_VALIDATE_EMAIL) || strlen($pw) < 8) throw new RuntimeException('Email tidak valid atau password minimal 8 karakter.');
-            $sid = $role === 'supplier' ? post_id('supplier_id') : null;
-            $cid = $role === 'coop' ? post_id('coop_id') : null;
-            $bid = $role === 'buyer' ? post_id('buyer_id') : null;
-            if ($sid && !val('SELECT id FROM suppliers WHERE id=?', [$sid])) throw new RuntimeException('PT tidak ditemukan.');
-            if ($cid && !val('SELECT id FROM cooperatives WHERE id=?', [$cid])) throw new RuntimeException('Koperasi tidak ditemukan.');
-            if ($bid && !val('SELECT id FROM buyer_profiles WHERE id=?', [$bid])) throw new RuntimeException('Pembeli tidak ditemukan.');
-            sql('INSERT INTO users(name,email,password_hash,role,supplier_id,coop_id,buyer_id) VALUES(?,?,?,?,?,?,?)', [
-                required_str('name', 120), $email, password_hash($pw, PASSWORD_DEFAULT), $role, $sid, $cid, $bid
-            ]);
-            audit((int)$actor['id'], 'create_user', 'user', (int)db()->lastInsertId(), $role);
-            flash('Akun berhasil dibuat.');
-            redirect('accounts');
-
-        case 'toggle_user':
-            must_role(['super_admin']);
+        case 'delete_coop':
+            must_role(['super_admin', 'induk']);
             $id = post_id('id');
-            if ($id === (int)$actor['id']) throw new RuntimeException('Akun yang sedang digunakan tidak bisa dinonaktifkan.');
-            sql('UPDATE users SET is_active=1-is_active WHERE id=?', [$id]);
-            audit((int)$actor['id'], 'toggle_user', 'user', $id);
-            flash('Status akun diubah.');
-            redirect('accounts');
+            sql("DELETE FROM cooperatives WHERE id=?", [$id]);
+            audit($u['id'], 'delete_coop', 'cooperatives', $id, 'Menghapus Koperasi Sektor yang tidak memenuhi syarat');
+            flash('Koperasi Anak Sektor Wilayah berhasil dihapus.');
+            redirect('verification');
 
-        case 'new_batch':
-            check_supplier_active($actor);
-            $raw = post_id('raw_type_id');
-            if (!val('SELECT id FROM raw_types WHERE id=?', [$raw])) throw new RuntimeException('Jenis limbah tidak ditemukan.');
-            sql('INSERT INTO raw_batches(supplier_id,raw_type_id,batch_code,quantity,unit,notes) VALUES(?,?,?,?,?,?)', [
-                $actor['supplier_id'], $raw, code('RAW'), positive('quantity'), 'kg', trim((string)($_POST['notes'] ?? ''))
+        case 'create_batch':
+            check_supplier_active($u);
+            $typeId = post_id('raw_type_id');
+            $qty    = positive('quantity');
+            $notes  = trim((string)($_POST['notes'] ?? ''));
+
+            $sid = ($u['role'] === 'super_admin') ? post_id('supplier_id') : (int)$u['supplier_id'];
+            if (!$sid) {
+                throw new RuntimeException('Akun PT Anda belum terikat dengan entitas PT Pemasok Utama.');
+            }
+
+            $bcode = code('RAW');
+
+            sql("INSERT INTO raw_batches(supplier_id, raw_type_id, batch_code, quantity, notes) VALUES (?, ?, ?, ?, ?)", [
+                $sid, $typeId, $bcode, $qty, $notes
             ]);
-            audit((int)$actor['id'], 'new_batch', 'raw_batch', (int)db()->lastInsertId());
-            flash('Batch limbah tercatat dan siap dialokasikan pusat.');
+            $bid = (int)db()->lastInsertId();
+            audit($u['id'], 'create_batch', 'raw_batches', $bid, 'Input batch pasokan limbah baru');
+            flash('Batch pasokan limbah mentah berhasil ditambahkan atas nama PT Anda!');
             redirect('batches');
 
         case 'allocate':
-            must_role(['super_admin', 'induk']);
+            must_role(['super_admin', 'induk', 'supplier']);
             $batchId = post_id('batch_id');
             $coopId  = post_id('coop_id');
             $qty     = positive('quantity');
-            db()->beginTransaction();
-            try {
-                $batch = one('SELECT * FROM raw_batches WHERE id=? FOR UPDATE', [$batchId]);
-                $coop  = one('SELECT * FROM cooperatives WHERE id=?', [$coopId]);
-                if (!$batch || !$coop || $coop['status'] !== 'verified' || (int)$coop['supplier_id'] !== (int)$batch['supplier_id'] || (int)$coop['specialty_raw_type_id'] !== (int)$batch['raw_type_id']) {
-                    throw new RuntimeException('Koperasi tujuan tidak cocok dengan PT / jenis limbah atau belum diverifikasi.');
-                }
-                $used = (float)val("SELECT COALESCE(SUM(quantity),0) FROM allocations WHERE batch_id=? AND status IN ('proposed','accepted','completed')", [$batchId]);
-                if ($qty > (float)$batch['quantity'] - $used + 0.00001) {
-                    throw new RuntimeException('Stok batch tidak cukup. Sisa: ' . number((float)$batch['quantity'] - $used) . ' kg.');
-                }
-                sql('INSERT INTO allocations(batch_id,coop_id,quantity,created_by) VALUES(?,?,?,?)', [$batchId, $coopId, $qty, $actor['id']]);
-                audit((int)$actor['id'], 'allocate', 'allocation', (int)db()->lastInsertId());
-                db()->commit();
-            } catch (Throwable $ex) {
-                db()->rollBack();
-                throw $ex;
+
+            $rem = val("SELECT (quantity - COALESCE((SELECT SUM(quantity) FROM allocations WHERE batch_id=raw_batches.id AND status<>'rejected'),0)) 
+                        FROM raw_batches WHERE id=?", [$batchId]);
+            
+            if ($qty > (float)$rem) {
+                throw new RuntimeException('Jumlah alokasi melebihi sisa stok batch limbah mentah (' . number((float)$rem) . ' kg).');
             }
-            flash('Alokasi dikirim ke Koperasi Anak.');
+
+            sql("INSERT INTO allocations(batch_id, coop_id, quantity, status, created_by) VALUES (?, ?, ?, 'proposed', ?)", [
+                $batchId, $coopId, $qty, $u['id']
+            ]);
+            $aid = (int)db()->lastInsertId();
+            audit($u['id'], 'allocate', 'allocations', $aid, 'Alokasi bahan mentah ke Koperasi Anak Sektor Wilayah');
+            flash('Alokasi pasokan berhasil dikirimkan ke Koperasi Anak Sektor Wilayah!');
             redirect('allocations');
 
         case 'respond_allocation':
-            check_coop_active($actor);
+            check_coop_active($u);
             $id     = post_id('id');
-            $status = required_str('status', 10);
-            if (!in_array($status, ['accepted', 'rejected'], true)) throw new RuntimeException('Status tidak valid.');
-            $st = sql("UPDATE allocations SET status=? WHERE id=? AND coop_id=? AND status='proposed'", [$status, $id, $actor['coop_id']]);
-            if (!$st->rowCount()) throw new RuntimeException('Alokasi sudah ditangani atau bukan milik koperasi ini.');
-            audit((int)$actor['id'], 'respond_allocation', 'allocation', $id, $status);
-            flash('Respons alokasi tersimpan.');
+            $status = required_str('status');
+
+            sql("UPDATE allocations SET status=? WHERE id=? AND coop_id=?", [$status, $id, $u['coop_id']]);
+            audit($u['id'], 'respond_allocation', 'allocations', $id, 'Koperasi Sektor merespon alokasi ke ' . $status);
+            flash('Respon alokasi bahan berhasil disimpan.');
             redirect('allocations');
 
-        case 'new_product':
-            check_coop_active($actor);
-            $raw  = post_id('raw_type_id');
-            $coop = one('SELECT * FROM cooperatives WHERE id=?', [$actor['coop_id']]);
-            if ((int)$coop['specialty_raw_type_id'] !== $raw) throw new RuntimeException('Jenis limbah produk harus sesuai spesialisasi koperasi.');
-            $sku   = required_str('sku', 40);
-            $price = positive('price');
-            sql('INSERT INTO products(coop_id,raw_type_id,sku,name,description,unit,price) VALUES(?,?,?,?,?,?,?)', [
-                $actor['coop_id'], $raw, $sku, required_str('name', 160), trim((string)($_POST['description'] ?? '')), 'kg', $price
+        case 'create_product':
+            check_coop_active($u);
+            $rawTypeId = post_id('raw_type_id');
+            $name      = required_str('name');
+            $price     = positive('price');
+            $desc      = trim((string)($_POST['description'] ?? ''));
+            $sku       = code('PROD');
+
+            sql("INSERT INTO products(coop_id, raw_type_id, sku, name, description, price, stock) VALUES (?, ?, ?, ?, ?, ?, 0)", [
+                $u['coop_id'], $rawTypeId, $sku, $name, $desc, $price
             ]);
-            audit((int)$actor['id'], 'new_product', 'product', (int)db()->lastInsertId());
-            flash('Produk berhasil dibuat; stok awal 0.');
+            $pid = (int)db()->lastInsertId();
+            audit($u['id'], 'create_product', 'products', $pid, 'Menambahkan katalog produk olahan baru');
+            flash('Produk olahan baru berhasil ditambahkan ke katalog Sektor!');
             redirect('products');
 
-        case 'production':
-            check_coop_active($actor);
-            $aid    = post_id('allocation_id');
-            $pid    = post_id('product_id');
-            $input  = positive('input_qty');
-            $output = positive('output_qty');
+        case 'log_production':
+            check_coop_active($u);
+            $allocId   = post_id('allocation_id');
+            $productId = post_id('product_id');
+            $inQty     = positive('input_qty');
+            $outQty    = positive('output_qty');
+            $notes     = trim((string)($_POST['notes'] ?? ''));
+
             db()->beginTransaction();
             try {
-                $all     = one('SELECT a.*,b.raw_type_id FROM allocations a JOIN raw_batches b ON b.id=a.batch_id WHERE a.id=? FOR UPDATE', [$aid]);
-                $product = one('SELECT * FROM products WHERE id=? FOR UPDATE', [$pid]);
-                if (!$all || !$product || !in_array($all['status'], ['accepted', 'completed'], true) || (int)$all['coop_id'] !== (int)$actor['coop_id'] || (int)$product['coop_id'] !== (int)$actor['coop_id'] || (int)$product['raw_type_id'] !== (int)$all['raw_type_id']) {
-                    throw new RuntimeException('Alokasi/produk tidak cocok atau belum disetujui.');
-                }
-                $used = (float)val('SELECT COALESCE(SUM(input_qty),0) FROM production_logs WHERE allocation_id=?', [$aid]);
-                if ($input > (float)$all['quantity'] - $used + 0.00001) {
-                    throw new RuntimeException('Input melebihi limbah tersedia: ' . number((float)$all['quantity'] - $used) . ' kg.');
-                }
-                sql('INSERT INTO production_logs(allocation_id,product_id,input_qty,output_qty,notes,created_by) VALUES(?,?,?,?,?,?)', [
-                    $aid, $pid, $input, $output, trim((string)($_POST['notes'] ?? '')), $actor['id']
+                sql("INSERT INTO production_logs(allocation_id, product_id, input_qty, output_qty, notes, created_by) VALUES (?, ?, ?, ?, ?, ?)", [
+                    $allocId, $productId, $inQty, $outQty, $notes, $u['id']
                 ]);
-                sql('UPDATE products SET stock=stock+? WHERE id=?', [$output, $pid]);
-                if ($used + $input + 0.00001 >= (float)$all['quantity']) {
-                    sql("UPDATE allocations SET status='completed' WHERE id=?", [$aid]);
-                }
-                audit((int)$actor['id'], 'production', 'product', $pid, $input . ' kg input -> ' . $output . ' kg produk');
+                $lid = (int)db()->lastInsertId();
+                sql("UPDATE products SET stock = stock + ? WHERE id=?", [$outQty, $productId]);
+                
                 db()->commit();
-            } catch (Throwable $ex) {
+                audit($u['id'], 'log_production', 'production_logs', $lid, 'Catatan konversi produksi olahan sektor');
+                flash('Konversi produksi berhasil dicatat! Stok produk Sektor bertambah ' . number($outQty) . ' kg.');
+                redirect('products');
+            } catch (Throwable $e) {
                 db()->rollBack();
-                throw $ex;
+                throw $e;
             }
-            flash('Produksi dicatat dan stok produk bertambah.');
-            redirect('products');
 
-        case 'new_order':
-            check_buyer_active($actor);
-            $pid = post_id('product_id');
-            $qty = positive('quantity');
-            $p   = one('SELECT p.*,c.status coop_status,s.status supplier_status FROM products p JOIN cooperatives c ON c.id=p.coop_id JOIN suppliers s ON s.id=c.supplier_id WHERE p.id=?', [$pid]);
-            if (!$p || !$p['is_active'] || $p['coop_status'] !== 'verified' || $p['supplier_status'] !== 'verified' || (float)$p['stock'] < $qty) {
-                throw new RuntimeException('Produk tidak tersedia atau stok kurang.');
+        case 'create_order':
+            must_role(['buyer']);
+            
+            // AUTO-CREATE PROFILE BUYER IF MISSING
+            $buyerId = $u['buyer_id'];
+            if (!$buyerId) {
+                $nib = 'BUY-' . date('Ymd') . '-' . rand(1000, 9999);
+                sql("INSERT INTO buyer_profiles(company_name, buyer_type, nib, address, city, status) VALUES (?, 'industry', ?, 'Kawasan Industri Jabodetabek', 'Jakarta', 'verified')", [
+                    $u['name'], $nib
+                ]);
+                $buyerId = (int)db()->lastInsertId();
+                sql("UPDATE users SET buyer_id=? WHERE id=?", [$buyerId, $u['id']]);
             }
+
+            $productId = post_id('product_id');
+            $qty       = positive('quantity');
+            $addr      = required_str('shipping_address');
+            $city      = required_str('city');
+            $notes     = trim((string)($_POST['notes'] ?? ''));
+
+            $prod = one("SELECT * FROM products WHERE id=? AND is_active=1", [$productId]);
+            if (!$prod || (float)$prod['stock'] < $qty) {
+                throw new RuntimeException('Stok produk olahan Sektor tidak mencukupi untuk jumlah pemesanan Anda.');
+            }
+
+            $total = round((float)$prod['price'] * $qty, 2);
+            $code  = code('ORD');
+
             db()->beginTransaction();
             try {
-                $total = round($qty * (float)$p['price'], 2);
-                sql('INSERT INTO orders(order_code,buyer_id,shipping_address,city,notes,total) VALUES(?,?,?,?,?,?)', [
-                    code('ORD'), $actor['buyer_id'], required_str('shipping_address', 1000), required_str('city', 90), trim((string)($_POST['notes'] ?? '')), $total
+                sql("INSERT INTO orders(order_code, buyer_id, shipping_address, city, notes, status, total) VALUES (?, ?, ?, ?, ?, 'requested', ?)", [
+                    $code, $buyerId, $addr, $city, $notes, $total
                 ]);
                 $oid = (int)db()->lastInsertId();
-                sql('INSERT INTO order_items(order_id,product_id,quantity,unit_price) VALUES(?,?,?,?)', [$oid, $pid, $qty, $p['price']]);
-                audit((int)$actor['id'], 'new_order', 'order', $oid);
+                sql("INSERT INTO order_items(order_id, product_id, quantity, unit_price) VALUES (?, ?, ?, ?)", [
+                    $oid, $productId, $qty, $prod['price']
+                ]);
+
                 db()->commit();
-            } catch (Throwable $ex) {
+                audit($u['id'], 'create_order', 'orders', $oid, 'Pengajuan pesanan B2B industri sektor baru');
+                flash('Pesanan industri berhasil dibuat! Menunggu persetujuan Koperasi Sektor.');
+                redirect('orders');
+            } catch (Throwable $e) {
                 db()->rollBack();
-                throw $ex;
+                throw $e;
             }
-            flash('Pesanan diajukan ke Koperasi Induk. Stok dikurangi setelah pesanan disetujui.');
-            redirect('orders');
 
         case 'approve_order':
-            must_role(['super_admin', 'induk']);
-            $oid      = post_id('id');
-            $decision = required_str('decision', 12);
-            if (!in_array($decision, ['approved', 'rejected'], true)) throw new RuntimeException('Keputusan tidak valid.');
+            check_coop_active($u);
+            $id     = post_id('id');
+            $status = required_str('status');
+
             db()->beginTransaction();
             try {
-                $order = one('SELECT * FROM orders WHERE id=? FOR UPDATE', [$oid]);
-                if (!$order || $order['status'] !== 'requested') throw new RuntimeException('Pesanan tidak dalam status diajukan.');
-                if ($decision === 'approved') {
-                    foreach (rows('SELECT * FROM order_items WHERE order_id=?', [$oid]) as $item) {
-                        $p = one('SELECT p.*,c.status coop_status,s.status supplier_status FROM products p JOIN cooperatives c ON c.id=p.coop_id JOIN suppliers s ON s.id=c.supplier_id WHERE p.id=? FOR UPDATE', [$item['product_id']]);
-                        if (!$p || $p['coop_status'] !== 'verified' || $p['supplier_status'] !== 'verified' || (float)$p['stock'] < (float)$item['quantity']) {
-                            throw new RuntimeException('Stok produk tidak cukup atau mitra belum valid.');
-                        }
-                        sql('UPDATE products SET stock=stock-? WHERE id=?', [$item['quantity'], $item['product_id']]);
+                sql("UPDATE orders SET status=?, approved_by=? WHERE id=?", [$status, $u['id'], $id]);
+                if ($status === 'approved') {
+                    $items = rows("SELECT * FROM order_items WHERE order_id=?", [$id]);
+                    foreach ($items as $it) {
+                        sql("UPDATE products SET stock = stock - ? WHERE id=?", [$it['quantity'], $it['product_id']]);
                     }
                 }
-                sql('UPDATE orders SET status=?,approved_by=? WHERE id=?', [$decision, $actor['id'], $oid]);
-                audit((int)$actor['id'], 'approve_order', 'order', $oid, $decision);
                 db()->commit();
-            } catch (Throwable $ex) {
+                audit($u['id'], 'approve_order', 'orders', $id, 'Koperasi Sektor menyetujui order ke ' . $status);
+                flash('Status pesanan berhasil diperbarui.');
+                redirect('orders');
+            } catch (Throwable $e) {
                 db()->rollBack();
-                throw $ex;
+                throw $e;
             }
-            flash('Keputusan pesanan berhasil disimpan.');
-            redirect('orders');
 
         case 'assign_driver':
-            must_role(['super_admin', 'induk']);
-            $oid = post_id('id');
-            $did = post_id('driver_id');
-            db()->beginTransaction();
-            try {
-                $order  = one('SELECT * FROM orders WHERE id=? FOR UPDATE', [$oid]);
-                $driver = one("SELECT id FROM users WHERE id=? AND role='driver' AND is_active=1", [$did]);
-                if (!$order || $order['status'] !== 'approved' || !$driver) throw new RuntimeException('Pesanan/driver tidak siap untuk ditugaskan.');
-                sql('INSERT INTO shipments(order_id,driver_id) VALUES(?,?)', [$oid, $did]);
-                $sid = (int)db()->lastInsertId();
-                sql("INSERT INTO shipment_events(shipment_id,event_type,note,actor_id) VALUES(?,'assigned','Driver ditugaskan Koperasi Induk',?)", [$sid, $actor['id']]);
-                sql("UPDATE orders SET status='assigned' WHERE id=?", [$oid]);
-                audit((int)$actor['id'], 'assign_driver', 'shipment', $sid);
-                db()->commit();
-            } catch (Throwable $ex) {
-                db()->rollBack();
-                throw $ex;
-            }
-            flash('Driver logistik berhasil ditugaskan.');
-            redirect('shipments');
+            must_role(['super_admin', 'induk', 'supplier']);
+            $orderId  = post_id('id');
+            $driverId = post_id('driver_id');
 
-        case 'approve_pickup':
-            $actor    = must_role(['super_admin', 'induk', 'coop']);
-            $sid      = post_id('id');
-            $decision = required_str('decision', 12);
-            $note     = required_str('note', 800);
-            if (!in_array($decision, ['approved', 'rejected'], true)) throw new RuntimeException('Keputusan pickup tidak valid.');
             db()->beginTransaction();
             try {
-                $ship = one('SELECT s.*,o.id order_id FROM shipments s JOIN orders o ON o.id=s.order_id WHERE s.id=? FOR UPDATE', [$sid]);
-                if (!$ship || $ship['status'] !== 'pickup_pending') throw new RuntimeException('Pickup tidak sedang menunggu persetujuan.');
-                if ($actor['role'] === 'coop' && !val('SELECT 1 FROM order_items i JOIN products p ON p.id=i.product_id WHERE i.order_id=? AND p.coop_id=? LIMIT 1', [$ship['order_id'], $actor['coop_id']])) {
-                    throw new RuntimeException('Pickup ini bukan dari lokasi Koperasi Anda.');
-                }
-                if ($decision === 'approved') {
-                    sql("UPDATE shipments SET status='picked_up',picked_up_at=NOW() WHERE id=?", [$sid]);
-                    sql("UPDATE orders SET status='in_transit' WHERE id=?", [$ship['order_id']]);
-                    $event = 'picked_up';
-                } else {
-                    sql("UPDATE shipments SET status='accepted' WHERE id=?", [$sid]);
-                    $event = 'pickup_rejected';
-                }
-                sql('INSERT INTO shipment_events(shipment_id,event_type,note,actor_id) VALUES(?,?,?,?)', [$sid, $event, $note, $actor['id']]);
-                audit((int)$actor['id'], 'approve_pickup', 'shipment', $sid, $decision);
+                sql("INSERT INTO shipments(order_id, driver_id, status) VALUES (?, ?, 'assigned') ON DUPLICATE KEY UPDATE driver_id=?, status='assigned'", [
+                    $orderId, $driverId, $driverId
+                ]);
+                $sid = val("SELECT id FROM shipments WHERE order_id=?", [$orderId]);
+                sql("UPDATE orders SET status='assigned' WHERE id=?", [$orderId]);
+                sql("INSERT INTO shipment_events(shipment_id, event_type, note, actor_id) VALUES (?, 'assigned', 'Driver armada ditugaskan untuk pengiriman Sektor Jabodetabek', ?)", [
+                    $sid, $u['id']
+                ]);
                 db()->commit();
-            } catch (Throwable $ex) {
+                audit($u['id'], 'assign_driver', 'shipments', (int)$sid, 'Penugasan driver armada ke pesanan sektor');
+                flash('Driver armada berhasil ditugaskan!');
+                redirect('shipments');
+            } catch (Throwable $e) {
                 db()->rollBack();
-                throw $ex;
+                throw $e;
             }
-            flash('Persetujuan pickup diperbarui.');
-            redirect('shipments');
 
         case 'shipment_event':
             must_role(['driver']);
-            $sid   = post_id('id');
-            $event = required_str('event_type', 20);
-            $note  = required_str('note', 1000);
-            if (!in_array($event, ['accepted', 'pickup_requested', 'location', 'delivered'], true)) throw new RuntimeException('Tahapan pengiriman tidak valid.');
-            $lat = coord('latitude', -90, 90, true);
-            $lng = coord('longitude', -180, 180, true);
-            if (($lat === null) !== ($lng === null)) throw new RuntimeException('Isi pasangan Lintang dan Bujur secara bersamaan.');
+            $shipId    = post_id('id');
+            $type      = required_str('event_type');
+            $note      = required_str('note');
+            $lat       = coord('latitude', -90, 90, true);
+            $lng       = coord('longitude', -180, 180, true);
+
             $proofPath = null;
             if (!empty($_FILES['proof']['name'])) {
-                if ($_FILES['proof']['error'] !== UPLOAD_ERR_OK || $_FILES['proof']['size'] > 5 * 1024 * 1024) throw new RuntimeException('Ukuran bukti foto/file maksimal 5 MB.');
-                $mime = (new finfo(FILEINFO_MIME_TYPE))->file($_FILES['proof']['tmp_name']);
-                $ext  = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/webp' => 'webp', 'application/pdf' => 'pdf'][$mime] ?? null;
-                if (!$ext) throw new RuntimeException('Bukti harus berformat JPG, PNG, WEBP, atau PDF.');
-                $proofPath = 'proof_' . bin2hex(random_bytes(16)) . '.' . $ext;
-                if (!move_uploaded_file($_FILES['proof']['tmp_name'], __DIR__ . '/../storage/uploads/' . $proofPath)) throw new RuntimeException('Bukti gagal diunggah.');
+                $ext = strtolower(pathinfo($_FILES['proof']['name'], PATHINFO_EXTENSION));
+                if (!in_array($ext, ['jpg', 'jpeg', 'png', 'webp', 'pdf'], true)) {
+                    throw new RuntimeException('Format berkas bukti harus berupa gambar (JPG/PNG) atau PDF.');
+                }
+                $filename = 'proof_' . $shipId . '_' . time() . '.' . $ext;
+                $target   = __DIR__ . '/../storage/uploads/' . $filename;
+                if (!move_uploaded_file($_FILES['proof']['tmp_name'], $target)) {
+                    throw new RuntimeException('Gagal menyimpan foto bukti pengiriman.');
+                }
+                $proofPath = $filename;
             }
-            if ($event === 'delivered' && !$proofPath) throw new RuntimeException('Pengiriman selesai wajib mengunggah foto bukti serah terima.');
+
             db()->beginTransaction();
             try {
-                $ship = one('SELECT s.*,o.status order_status FROM shipments s JOIN orders o ON o.id=s.order_id WHERE s.id=? FOR UPDATE', [$sid]);
-                if (!$ship || (int)$ship['driver_id'] !== (int)$actor['id']) throw new RuntimeException('Pengiriman bukan tugas Anda.');
-                $expected = ['accepted' => 'assigned', 'pickup_requested' => 'accepted', 'delivered' => 'picked_up'];
-                if ($event === 'location' && !in_array($ship['status'], ['accepted', 'pickup_pending', 'picked_up'], true)) throw new RuntimeException('Perbarui lokasi setelah tugas diterima dan sebelum selesai.');
-                if ($event !== 'location' && $ship['status'] !== ($expected[$event] ?? '')) throw new RuntimeException('Urutan tahapan pengiriman tidak sesuai.');
-                sql('INSERT INTO shipment_events(shipment_id,event_type,note,latitude,longitude,proof_path,actor_id) VALUES(?,?,?,?,?,?,?)', [$sid, $event, $note, $lat, $lng, $proofPath, $actor['id']]);
-                if ($event === 'pickup_requested') {
-                    sql("UPDATE shipments SET status='pickup_pending' WHERE id=?", [$sid]);
-                } elseif ($event === 'delivered') {
-                    sql("UPDATE shipments SET status='delivered',delivered_at=NOW() WHERE id=?", [$sid]);
-                    sql("UPDATE orders SET status='delivered' WHERE id=?", [$ship['order_id']]);
-                } elseif ($event === 'accepted') {
-                    sql("UPDATE shipments SET status='accepted' WHERE id=?", [$sid]);
-                }
-                audit((int)$actor['id'], 'shipment_event', 'shipment', $sid, $event);
-                db()->commit();
-            } catch (Throwable $ex) {
-                db()->rollBack();
-                throw $ex;
-            }
-            flash('Status pengiriman berhasil diperbarui.');
-            redirect('shipments');
+                $newStatus = match($type) {
+                    'accepted'         => 'accepted',
+                    'pickup_requested' => 'pickup_pending',
+                    'location'         => 'in_transit',
+                    'delivered'        => 'delivered',
+                    default            => 'in_transit'
+                };
 
-        case 'confirm_order':
-            check_buyer_active($actor);
-            $oid = post_id('id');
-            $st  = sql("UPDATE orders SET status='completed' WHERE id=? AND buyer_id=? AND status='delivered'", [$oid, $actor['buyer_id']]);
-            if (!$st->rowCount()) throw new RuntimeException('Pesanan belum dapat dikonfirmasi.');
-            audit((int)$actor['id'], 'confirm_order', 'order', $oid);
-            flash('Penerimaan barang dikonfirmasi oleh pembeli.');
+                sql("UPDATE shipments SET status=? WHERE id=?", [$newStatus, $shipId]);
+                $orderId = val("SELECT order_id FROM shipments WHERE id=?", [$shipId]);
+                sql("UPDATE orders SET status=? WHERE id=?", [$newStatus, $orderId]);
+
+                sql("INSERT INTO shipment_events(shipment_id, event_type, note, latitude, longitude, proof_path, actor_id) VALUES (?, ?, ?, ?, ?, ?, ?)", [
+                    $shipId, $type, $note, $lat, $lng, $proofPath, $u['id']
+                ]);
+
+                db()->commit();
+                audit($u['id'], 'shipment_event', 'shipments', $shipId, 'Update status driver ke ' . $type);
+                flash('Pembaruan rute pengiriman Jabodetabek berhasil dikirim!');
+                redirect('shipments');
+            } catch (Throwable $e) {
+                db()->rollBack();
+                throw $e;
+            }
+
+        case 'approve_pickup':
+            must_role(['super_admin', 'induk', 'supplier', 'coop']);
+            $shipId   = post_id('id');
+            $decision = required_str('decision');
+            $note     = required_str('note');
+
+            $status = ($decision === 'approved') ? 'picked_up' : 'pickup_rejected';
+            $type   = ($decision === 'approved') ? 'picked_up' : 'pickup_rejected';
+
+            db()->beginTransaction();
+            try {
+                sql("UPDATE shipments SET status=?, picked_up_at=NOW() WHERE id=?", [$status, $shipId]);
+                $orderId = val("SELECT order_id FROM shipments WHERE id=?", [$shipId]);
+                sql("UPDATE orders SET status=? WHERE id=?", [$status, $orderId]);
+
+                sql("INSERT INTO shipment_events(shipment_id, event_type, note, actor_id) VALUES (?, ?, ?, ?)", [
+                    $shipId, $type, $note, $u['id']
+                ]);
+
+                db()->commit();
+                audit($u['id'], 'approve_pickup', 'shipments', $shipId, 'Respon persetujuan pickup ke ' . $status);
+                flash('Konfirmasi penyerahan barang gudang Sektor berhasil disimpan.');
+                redirect('shipments');
+            } catch (Throwable $e) {
+                db()->rollBack();
+                throw $e;
+            }
+
+        case 'confirm_order_received':
+            must_role(['buyer']);
+            $id = post_id('id');
+
+            sql("UPDATE orders SET status='completed' WHERE id=?", [$id]);
+            audit($u['id'], 'confirm_order_received', 'orders', $id, 'Pembeli mengonfirmasi barang telah diterima');
+            flash('Terima kasih! Pesanan industri Jabodetabek telah selesai secara sempurna.', 'success');
             redirect('orders');
 
         default:
-            throw new RuntimeException('Tindakan tidak dikenali.');
+            throw new RuntimeException('Aksi yang Anda minta tidak dikenali.');
     }
 }

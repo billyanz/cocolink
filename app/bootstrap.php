@@ -54,14 +54,6 @@ function uni_len(string $s): int {
     return function_exists('mb_strlen') ? mb_strlen($s) : strlen($s);
 }
 
-function uni_lower(string $s): string {
-    return function_exists('mb_strtolower') ? mb_strtolower($s) : strtolower($s);
-}
-
-function uni_slice(string $s, int $start, int $length): string {
-    return function_exists('mb_substr') ? mb_substr($s, $start, $length) : substr($s, $start, $length);
-}
-
 function e(mixed $v): string {
     return htmlspecialchars((string)($v ?? ''), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
 }
@@ -123,14 +115,14 @@ function user(): array {
 function must_role(array $roles): array {
     $u = user();
     if (!in_array($u['role'], $roles, true)) {
-        throw new RuntimeException('Anda tidak memiliki hak akses untuk membuka halaman ini.');
+        throw new RuntimeException('Halaman ini tidak tersedia untuk peran akun Anda (' . strtoupper($u['role']) . ').');
     }
     return $u;
 }
 
 function is_manager(?array $u = null): bool {
     $u ??= current_user();
-    return $u && in_array($u['role'], ['super_admin', 'induk'], true);
+    return $u && in_array($u['role'], ['super_admin', 'induk', 'supplier'], true);
 }
 
 function flash(string $message, string $kind = 'success'): void {
@@ -202,8 +194,7 @@ function status_text(string $status): string {
         'pickup_requested' => 'Driver Meminta Pickup',
         'pickup_rejected'  => 'Pickup Ditolak Gudang',
         'picked_up'        => 'Sudah Diambil dari Gudang',
-        'delivered'        => 'Barang Tiba di Tujuan',
-        'location'         => 'Pembaruan Posisi GPS'
+        'delivered'        => 'Barang Tiba di Tujuan'
     ][$status] ?? ucwords(str_replace('_', ' ', $status));
 }
 
@@ -218,18 +209,6 @@ function badge(string $status): string {
     return '<span class="badge rounded-pill text-bg-' . $color . ' px-3 py-2 fw-semibold" style="font-size:0.82rem;"><i class="bi bi-dot me-1"></i>' . e(status_text($status)) . '</span>';
 }
 
-function initials(string $name): string {
-    $words = preg_split('/\s+/u', trim($name));
-    return strtoupper(substr(($words[0] ?? 'C'), 0, 1) . substr(($words[1] ?? 'L'), 0, 1));
-}
-
-/* ==========================================================================
-   HELPER INPUT FORM & TAMPILAN ELEGAN (KPI, Field, Select, Action)
-   ========================================================================== */
-
-/**
- * HELPER KPI CARD (Fix undefined function kpi)
- */
 function kpi(string $label, mixed $val, string $icon = 'bi-activity', string $colorClass = 'text-success bg-success'): void {
 ?>
     <div class="card border-0 shadow-sm p-3 h-100" style="border-radius:14px;">
@@ -296,19 +275,35 @@ function table_empty(string $msg = 'Belum ada catatan data transaksi yang tersed
 }
 
 function check_supplier_active(array $u): void {
-    if ($u['role'] !== 'supplier' || !$u['supplier_id'] || val('SELECT status FROM suppliers WHERE id=?', [$u['supplier_id']]) !== 'verified') {
-        throw new RuntimeException('PT Pemasok Anda belum aktif atau masih dalam tahap verifikasi.');
+    if ($u['role'] === 'super_admin') return;
+    if ($u['role'] === 'supplier' || $u['role'] === 'induk') {
+        if (!$u['supplier_id']) {
+            throw new RuntimeException('Akun Anda belum terikat dengan entitas PT Pemasok Utama.');
+        }
+        $status = val('SELECT status FROM suppliers WHERE id=?', [$u['supplier_id']]);
+        if ($status !== 'verified') {
+            throw new RuntimeException('PT Pemasok Anda belum aktif atau masih dalam tahap pengesahan Super Admin.');
+        }
     }
 }
 
 function check_coop_active(array $u): void {
-    if ($u['role'] !== 'coop' || !$u['coop_id'] || val('SELECT status FROM cooperatives WHERE id=?', [$u['coop_id']]) !== 'verified') {
+    if ($u['role'] === 'super_admin') return;
+    if ($u['role'] !== 'coop' || !$u['coop_id'] || val("SELECT status FROM cooperatives WHERE id=?", [$u['coop_id']]) !== 'verified') {
         throw new RuntimeException('Koperasi Anak Anda belum diaktifkan oleh Admin Koperasi Induk.');
     }
 }
 
 function check_buyer_active(array $u): void {
-    if ($u['role'] !== 'buyer' || !$u['buyer_id'] || val('SELECT status FROM buyer_profiles WHERE id=?', [$u['buyer_id']]) !== 'verified') {
-        throw new RuntimeException('Akun Pembeli Industri Anda masih menunggu persetujuan legalitas.');
+    if ($u['role'] === 'super_admin') return;
+    if ($u['role'] === 'buyer') {
+        if (!$u['buyer_id']) {
+            $nib = 'BUY-' . date('Ymd') . '-' . rand(1000, 9999);
+            sql("INSERT INTO buyer_profiles(company_name, buyer_type, nib, address, city, status) VALUES (?, 'industry', ?, 'Kawasan Industri Jabodetabek', 'Jakarta', 'verified')", [
+                $u['name'], $nib
+            ]);
+            $buyerId = (int)db()->lastInsertId();
+            sql("UPDATE users SET buyer_id=? WHERE id=?", [$buyerId, $u['id']]);
+        }
     }
 }

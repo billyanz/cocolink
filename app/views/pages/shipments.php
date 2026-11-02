@@ -20,9 +20,9 @@ function page_shipments(array $u): void {
     if ($driver) {
         $ships = rows($query . ' WHERE sh.driver_id=? GROUP BY sh.id ORDER BY sh.id DESC', [$u['id']]);
     } elseif ($u['role'] === 'coop') {
-        $ships = rows($query . ' WHERE p.coop_id=? GROUP BY sh.id ORDER BY sh.id DESC', [$u['coop_id']]);
+        $ships = rows($query . ' WHERE p.coop_id=? GROUP BY sh.id ORDER BY sh.id DESC', [(int)($u['coop_id'] ?? 0)]);
     } elseif ($isBuyer) {
-        $ships = rows($query . ' WHERE o.buyer_id=? GROUP BY sh.id ORDER BY sh.id DESC', [$u['buyer_id']]);
+        $ships = rows($query . ' WHERE o.buyer_id=? GROUP BY sh.id ORDER BY sh.id DESC', [(int)($u['buyer_id'] ?? 0)]);
     } else {
         $ships = rows($query . ' GROUP BY sh.id ORDER BY sh.id DESC');
     }
@@ -35,7 +35,7 @@ function page_shipments(array $u): void {
     foreach ($events as $ev) $by[$ev['shipment_id']][] = $ev;
 ?>
 
-<!-- ASSETS LEAFLET MAP & CUSTOM TRUCK ICON -->
+<!-- ASSETS LEAFLET MAP & TRUCK ICON -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
@@ -45,7 +45,7 @@ function page_shipments(array $u): void {
             <div class="p-3 rounded-circle bg-white bg-opacity-20 fs-3 text-white"><i class="bi bi-truck-front-fill"></i></div>
             <div>
                 <h5 class="fw-bold mb-1 text-white">Live Tracking Logistik & Route Simulation</h5>
-                <p class="mb-0 small text-white-50">Monitoring titik pergerakan armada driver dari Gudang Koperasi Anak menuju Alamat Industri Pembeli.</p>
+                <p class="mb-0 small text-white-50">Monitoring titik pergerakan armada driver dari Gudang Koperasi Anak Sektor menuju Pabrik Industri Pembeli.</p>
             </div>
         </div>
     </div>
@@ -74,8 +74,7 @@ function page_shipments(array $u): void {
 
 <div class="row g-4">
 <?php foreach ($ships as $s): 
-    $startLat = -6.8915; $startLng = 107.5981; // Bandung (Gudang Koperasi)
-    $destLat  = -6.1923; $destLng  = 106.9123; // Jakarta (Tujuan Pembeli)
+    $startLat = -6.2000; $startLng = 106.8166; // Jakarta Central
     $currLat  = $s['curr_lat'] ? (float)$s['curr_lat'] : $startLat;
     $currLng  = $s['curr_lng'] ? (float)$s['curr_lng'] : $startLng;
 ?>
@@ -91,7 +90,7 @@ function page_shipments(array $u): void {
                     <div><?= badge($s['status']) ?></div>
                 </div>
 
-                <!-- LIVE MAPS TRACKING SHOPEE STYLE -->
+                <!-- LIVE MAPS TRACKING -->
                 <div class="mb-3 rounded overflow-hidden border shadow-sm" style="height:220px; position:relative;">
                     <div id="shipMap<?= $s['id'] ?>" style="height:100%; width:100%;"></div>
                 </div>
@@ -104,7 +103,7 @@ function page_shipments(array $u): void {
                         </div>
                         <div class="col-6">
                             <span class="text-muted d-block">Asal Gudang Koperasi:</span>
-                            <strong class="text-dark"><i class="bi bi-shop me-1"></i><?= e($s['coop_name'] ?? 'Gudang Penampungan') ?></strong>
+                            <strong class="text-dark"><i class="bi bi-shop me-1"></i><?= e($s['coop_name'] ?? 'Gudang Sektor') ?></strong>
                         </div>
                     </div>
                 </div>
@@ -129,7 +128,7 @@ function page_shipments(array $u): void {
                                         ]); ?>
                                     </div>
                                     <div class="col-12">
-                                        <input type="text" class="form-control form-control-sm" name="note" required placeholder="Catatan posisi (misal: Tol Cikampek KM 42)">
+                                        <input type="text" class="form-control form-control-sm" name="note" required placeholder="Catatan posisi (misal: Tol Jagorawi KM 15)">
                                     </div>
                                     <div class="col-6">
                                         <input class="form-control form-control-sm" id="lat<?= $s['id'] ?>" type="number" step="any" name="latitude" value="<?= $currLat ?>">
@@ -152,11 +151,11 @@ function page_shipments(array $u): void {
                     </div>
                 <?php endif; ?>
 
-                <!-- ACC PICKUP GUDANG KOPERASI ANAK -->
+                <!-- ACC PICKUP GUDANG KOPERASI ANAK SEKTOR -->
                 <?php if (($manager || $u['role'] === 'coop') && $s['status'] === 'pickup_pending'): ?>
                     <div class="card border-warning mb-3" style="border-radius:12px; background:#FFFDF3;">
                         <div class="card-body p-3">
-                            <strong class="text-warning-emphasis d-block mb-1"><i class="bi bi-exclamation-circle me-1"></i>ACC Pickup Gudang Koperasi Anak</strong>
+                            <strong class="text-warning-emphasis d-block mb-1"><i class="bi bi-exclamation-circle me-1"></i>ACC Pickup Gudang Koperasi Sektor</strong>
                             <p class="small text-muted mb-2">Driver berada di lokasi gudang penampungan Koperasi Anak untuk mengambil barang.</p>
                             <form method="post">
                                 <?= csrf_input() ?>
@@ -193,7 +192,6 @@ document.addEventListener('DOMContentLoaded', function() {
     var m = L.map('shipMap<?= $s['id'] ?>').setView([<?= $currLat ?>, <?= $currLng ?>], 10);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(m);
 
-    // Dynamic Truck Icon
     var truckIcon = L.icon({
         iconUrl: 'https://cdn-icons-png.flaticon.com/512/754/754848.png',
         iconSize: [36, 36],
