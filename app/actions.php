@@ -14,11 +14,21 @@ function process_action(): void {
 
     switch ($action) {
         case 'logout':
+            // Catat logout sebelum sesi dibersihkan
             audit((int)$actor['id'], 'logout', 'user', (int)$actor['id']);
-            unset($_SESSION['uid']);
+
+            // Bersihkan seluruh data sesi
+            $_SESSION = [];
+
+            // Invalidasi ID sesi lama dan buat ID baru
             session_regenerate_id(true);
+
+            // Simpan notifikasi pada sesi baru
             flash('Anda telah keluar dari sistem.');
+
             redirect('home');
+            break;
+
 
         case 'login':
             $email = strtolower(required_str('email', 190));
