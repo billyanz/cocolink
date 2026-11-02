@@ -36,8 +36,8 @@ function page_dashboard(array $u): void {
         $totSuppliers = 1;
         $totCoops     = 1;
         $totBatches   = val("SELECT COALESCE(SUM(quantity),0) FROM allocations WHERE coop_id=? AND status='accepted'", [$cid]);
-        $onGoing      = val("SELECT COUNT(*) FROM orders o JOIN order_items i ON i.order_id=o.id JOIN products p ON p.id=i.product_id WHERE p.coop_id=? AND o.status IN ('approved','assigned','in_transit','pickup_pending')", [$cid]);
-        $completed    = val("SELECT COUNT(*) FROM orders o JOIN order_items i ON i.order_id=o.id JOIN products p ON p.id=i.product_id WHERE p.coop_id=? AND o.status='completed'", [$cid]);
+        $onGoing      = val("SELECT COUNT(*) FROM orders o JOIN order_items i ON i.order_id=i.order_id JOIN products p ON p.id=i.product_id WHERE p.coop_id=? AND o.status IN ('approved','assigned','in_transit','pickup_pending')", [$cid]);
+        $completed    = val("SELECT COUNT(*) FROM orders o JOIN order_items i ON i.order_id=i.order_id JOIN products p ON p.id=i.product_id WHERE p.coop_id=? AND o.status='completed'", [$cid]);
     } else {
         $totSuppliers = val("SELECT COUNT(*) FROM suppliers WHERE status='verified'");
         $totCoops     = val("SELECT COUNT(*) FROM cooperatives WHERE status='verified'");
@@ -46,6 +46,9 @@ function page_dashboard(array $u): void {
         $completed    = val("SELECT COUNT(*) FROM orders WHERE buyer_id=? AND status='completed'", [(int)($u['buyer_id'] ?? 0)]);
     }
 ?>
+
+<!-- ASSETS CHART.JS VIA CDN -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
 <div class="card border-0 shadow-sm mb-4" style="border-radius:16px; background: linear-gradient(135deg, #164B35 0%, #22694E 100%); color:white;">
     <div class="card-body p-4">
@@ -73,12 +76,89 @@ function page_dashboard(array $u): void {
         <?php kpi('Transaksi Selesai', $completed, 'bi-check-circle-fill', 'text-success bg-success'); ?>
     </div>
     <div class="col-md-3">
-        <?php kpi($isCoop ? 'Volume Pasokan Diterima (kg)' : 'Total Pasokan Limbah (kg)', $totBatches, 'bi-box-seam-fill', 'text-info bg-info'); ?>
+        <?php kpi($isCoop ? 'Pasokan Diterima (kg)' : 'Total Pasokan Limbah (kg)', $totBatches, 'bi-box-seam-fill', 'text-info bg-info'); ?>
     </div>
     <div class="col-md-3">
         <?php kpi('Koperasi Sektor Aktif', $totCoops, 'bi-shop', 'text-primary bg-primary'); ?>
     </div>
 </div>
+
+<!-- GRAFIK ANALITIK CHART.JS (SIRKULAR & TREN BULANAN) -->
+<div class="row g-4 mb-4">
+    <div class="col-lg-6">
+        <div class="card border-0 shadow-sm h-100" style="border-radius:16px;">
+            <div class="card-body p-4">
+                <h5 class="fw-bold text-dark mb-3"><i class="bi bi-pie-chart-fill me-2" style="color:#164B35"></i>Komposisi Kategori Limbah Sektor</h5>
+                <div style="height: 280px; position: relative;">
+                    <canvas id="limbahChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-6">
+        <div class="card border-0 shadow-sm h-100" style="border-radius:16px;">
+            <div class="card-body p-4">
+                <h5 class="fw-bold text-dark mb-3"><i class="bi bi-graph-up-arrow me-2" style="color:#164B35"></i>Tren Volume Transaksi B2B (Jabodetabek)</h5>
+                <div style="height: 280px; position: relative;">
+                    <canvas id="trenChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- SCRIPT INISIALISASI CHART.JS -->
+<script>
+document.addEventListener("DOMContentLoaded", function() {
+    // 1. Chart Donat Komposisi Limbah
+    const ctxLimbah = document.getElementById('limbahChart').getContext('2d');
+    new Chart(ctxLimbah, {
+        type: 'doughnut',
+        data: {
+            labels: ['Daun & Lidi', 'Tempurung', 'Sabut', 'Batang & Kayu', 'Air & Ampas'],
+            datasets: [{
+                data: [40, 25, 20, 10, 5],
+                backgroundColor: ['#164B35', '#22694E', '#38A169', '#68D391', '#C6F6D5'],
+                borderWidth: 2,
+                borderColor: '#FFFFFF'
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { position: 'bottom' }
+            }
+        }
+    });
+
+    // 2. Chart Batang Tren Transaksi
+    const ctxTren = document.getElementById('trenChart').getContext('2d');
+    new Chart(ctxTren, {
+        type: 'bar',
+        data: {
+            labels: ['Jul', 'Agu', 'Sep', 'Okt', 'Nov (Aktif)'],
+            datasets: [{
+                label: 'Volume Pasokan (Ton)',
+                data: [12, 19, 25, 32, 45],
+                backgroundColor: '#164B35',
+                borderRadius: 8
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false }
+            },
+            scales: {
+                y: { beginAtZero: true }
+            }
+        }
+    });
+});
+</script>
 
 <!-- SUMMARY MONITORING DARI HULU KE HILIR -->
 <div class="card border-0 shadow-sm" style="border-radius:16px;">

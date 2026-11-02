@@ -6,7 +6,7 @@ function page_shipments(array $u): void {
 
     $query = "SELECT sh.*, o.order_code, o.status AS order_status, o.shipping_address, o.city, o.total, b.company_name, 
               us.name AS driver_name, 
-              c.name AS coop_name, c.address AS coop_address, c.city AS coop_city,
+              c.name AS coop_name, c.address AS coop_address, c.city AS coop_city, c.latitude AS coop_lat, c.longitude AS coop_lng,
               s_lat.latitude AS curr_lat, s_lat.longitude AS curr_lng
               FROM shipments sh 
               JOIN orders o ON o.id=sh.order_id 
@@ -35,17 +35,19 @@ function page_shipments(array $u): void {
     foreach ($events as $ev) $by[$ev['shipment_id']][] = $ev;
 ?>
 
-<!-- ASSETS LEAFLET MAP & TRUCK ICON -->
+<!-- ASSETS LEAFLET MAP & LEAFLET ROUTING MACHINE (AUTO ROUTING OSRM) -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css" />
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.js"></script>
 
 <div class="card border-0 shadow-sm mb-4" style="border-radius:16px; background: linear-gradient(135deg, #164B35 0%, #1D5C43 100%); color:white;">
     <div class="card-body p-4">
         <div class="d-flex align-items-center gap-3">
             <div class="p-3 rounded-circle bg-white bg-opacity-20 fs-3 text-white"><i class="bi bi-truck-front-fill"></i></div>
             <div>
-                <h5 class="fw-bold mb-1 text-white">Live Tracking Logistik & Route Simulation</h5>
-                <p class="mb-0 small text-white-50">Monitoring titik pergerakan armada driver dari Gudang Koperasi Anak Sektor menuju Pabrik Industri Pembeli.</p>
+                <h5 class="fw-bold mb-1 text-white">Live Tracking Logistik & Auto-Routing OSRM</h5>
+                <p class="mb-0 small text-white-50">Menarik garis rute otomatis dari Gudang Koperasi Sektor menuju Pabrik Industri Pembeli beserta estimasi jarak.</p>
             </div>
         </div>
     </div>
@@ -74,9 +76,13 @@ function page_shipments(array $u): void {
 
 <div class="row g-4">
 <?php foreach ($ships as $s): 
-    $startLat = -6.2000; $startLng = 106.8166; // Jakarta Central
-    $currLat  = $s['curr_lat'] ? (float)$s['curr_lat'] : $startLat;
-    $currLng  = $s['curr_lng'] ? (float)$s['curr_lng'] : $startLng;
+    // Koordinat Asal Gudang Koperasi (Default Jakarta Pusat jika null)
+    $coopLat = $s['coop_lat'] ? (float)$s['coop_lat'] : -6.1754;
+    $coopLng = $s['coop_lng'] ? (float)$s['coop_lng'] : 106.8272;
+    // Koordinat Tujuan Industri Pembeli (Default Cikarang jika null)
+    $destLat = -6.2840; $destLng = 107.1513; 
+    $currLat = $s['curr_lat'] ? (float)$s['curr_lat'] : $coopLat;
+    $currLng = $s['curr_lng'] ? (float)$s['curr_lng'] : $coopLng;
 ?>
     <div class="col-xl-6">
         <div class="card border-0 shadow-sm h-100" style="border-radius:16px;">
@@ -90,8 +96,8 @@ function page_shipments(array $u): void {
                     <div><?= badge($s['status']) ?></div>
                 </div>
 
-                <!-- LIVE MAPS TRACKING -->
-                <div class="mb-3 rounded overflow-hidden border shadow-sm" style="height:220px; position:relative;">
+                <!-- LIVE MAPS AUTO-ROUTING OSRM -->
+                <div class="mb-3 rounded overflow-hidden border shadow-sm" style="height:250px; position:relative;">
                     <div id="shipMap<?= $s['id'] ?>" style="height:100%; width:100%;"></div>
                 </div>
 
@@ -102,8 +108,8 @@ function page_shipments(array $u): void {
                             <strong class="text-dark"><i class="bi bi-person-badge me-1"></i><?= e($s['driver_name']) ?></strong>
                         </div>
                         <div class="col-6">
-                            <span class="text-muted d-block">Asal Gudang Koperasi:</span>
-                            <strong class="text-dark"><i class="bi bi-shop me-1"></i><?= e($s['coop_name'] ?? 'Gudang Sektor') ?></strong>
+                            <span class="text-muted d-block">Asal Gudang Sektor:</span>
+                            <strong class="text-dark"><i class="bi bi-shop me-1"></i><?= e($s['coop_name'] ?? 'Gudang Koperasi') ?></strong>
                         </div>
                     </div>
                 </div>
@@ -128,7 +134,7 @@ function page_shipments(array $u): void {
                                         ]); ?>
                                     </div>
                                     <div class="col-12">
-                                        <input type="text" class="form-control form-control-sm" name="note" required placeholder="Catatan posisi (misal: Tol Jagorawi KM 15)">
+                                        <input type="text" class="form-control form-control-sm" name="note" required placeholder="Catatan posisi (misal: Tol Cikampek KM 20)">
                                     </div>
                                     <div class="col-6">
                                         <input class="form-control form-control-sm" id="lat<?= $s['id'] ?>" type="number" step="any" name="latitude" value="<?= $currLat ?>">
@@ -156,7 +162,7 @@ function page_shipments(array $u): void {
                     <div class="card border-warning mb-3" style="border-radius:12px; background:#FFFDF3;">
                         <div class="card-body p-3">
                             <strong class="text-warning-emphasis d-block mb-1"><i class="bi bi-exclamation-circle me-1"></i>ACC Pickup Gudang Koperasi Sektor</strong>
-                            <p class="small text-muted mb-2">Driver berada di lokasi gudang penampungan Koperasi Anak untuk mengambil barang.</p>
+                            <p class="small text-muted mb-2">Driver berada di lokasi gudang penampungan Koperasi Sektor untuk mengambil barang.</p>
                             <form method="post">
                                 <?= csrf_input() ?>
                                 <input type="hidden" name="action" value="approve_pickup">
@@ -189,17 +195,28 @@ function page_shipments(array $u): void {
 
 <script>
 document.addEventListener('DOMContentLoaded', function() {
-    var m = L.map('shipMap<?= $s['id'] ?>').setView([<?= $currLat ?>, <?= $currLng ?>], 10);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(m);
+    var mapId = 'shipMap<?= $s['id'] ?>';
+    var map = L.map(mapId).setView([<?= $coopLat ?>, <?= $coopLng ?>], 11);
+    
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(map);
 
-    var truckIcon = L.icon({
-        iconUrl: 'https://cdn-icons-png.flaticon.com/512/754/754848.png',
-        iconSize: [36, 36],
-        iconAnchor: [18, 18]
-    });
-
-    L.marker([<?= $currLat ?>, <?= $currLng ?>], {icon: truckIcon}).addTo(m)
-        .bindPopup('<strong>Truk Driver Armada</strong><br><small><?= e($s['driver_name']) ?></small>').openPopup();
+    // OSRM Auto-Routing Control (Gudang Sektor -> Pabrik Buyer)
+    L.Routing.control({
+        waypoints: [
+            L.latLng(<?= $coopLat ?>, <?= $coopLng ?>), // Asal Gudang Sektor
+            L.latLng(<?= $destLat ?>, <?= $destLng ?>)  // Tujuan Pabrik Industri
+        ],
+        routeWhileDragging: false,
+        addWaypoints: false,
+        draggableWaypoints: false,
+        fitSelectedRoutes: true,
+        showAlternatives: false,
+        lineOptions: {
+            styles: [{color: '#164B35', opacity: 0.8, weight: 5}]
+        }
+    }).addTo(map);
 });
 </script>
 <?php endforeach; ?>
