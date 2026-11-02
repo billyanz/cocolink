@@ -2,29 +2,29 @@
 function page_shipments(array $u): void {
     $manager = is_manager($u);
     $driver  = $u['role'] === 'driver';
+    $isBuyer = $u['role'] === 'buyer';
 
     $query = "SELECT sh.*, o.order_code, o.status AS order_status, o.shipping_address, o.city, o.total, b.company_name, 
-              us.name AS driver_name, us.email AS driver_email, 
-              (SELECT CONCAT(c.name, ' — ', c.address, ', ', c.city) 
-               FROM order_items i 
-               JOIN products p ON p.id=i.product_id 
-               JOIN cooperatives c ON c.id=p.coop_id 
-               WHERE i.order_id=o.id LIMIT 1) AS pickup_address 
+              us.name AS driver_name, 
+              c.name AS coop_name, c.address AS coop_address, c.city AS coop_city,
+              s_lat.latitude AS curr_lat, s_lat.longitude AS curr_lng
               FROM shipments sh 
               JOIN orders o ON o.id=sh.order_id 
               JOIN buyer_profiles b ON b.id=o.buyer_id 
-              JOIN users us ON us.id=sh.driver_id";
+              JOIN users us ON us.id=sh.driver_id
+              LEFT JOIN order_items i ON i.order_id=o.id
+              LEFT JOIN products p ON p.id=i.product_id
+              LEFT JOIN cooperatives c ON c.id=p.coop_id
+              LEFT JOIN shipment_events s_lat ON s_lat.id = (SELECT MAX(id) FROM shipment_events WHERE shipment_id=sh.id AND latitude IS NOT NULL)";
 
     if ($driver) {
-        $ships = rows($query . ' WHERE sh.driver_id=? ORDER BY sh.id DESC', [$u['id']]);
+        $ships = rows($query . ' WHERE sh.driver_id=? GROUP BY sh.id ORDER BY sh.id DESC', [$u['id']]);
     } elseif ($u['role'] === 'coop') {
-        $ships = rows($query . ' WHERE EXISTS(SELECT 1 FROM order_items i JOIN products p ON p.id=i.product_id WHERE i.order_id=o.id AND p.coop_id=?) ORDER BY sh.id DESC', [$u['coop_id']]);
-    } elseif ($u['role'] === 'supplier') {
-        $ships = rows($query . ' WHERE EXISTS(SELECT 1 FROM order_items i JOIN products p ON p.id=i.product_id JOIN cooperatives c ON c.id=p.coop_id WHERE i.order_id=o.id AND c.supplier_id=?) ORDER BY sh.id DESC', [$u['supplier_id']]);
-    } elseif ($u['role'] === 'buyer') {
-        $ships = rows($query . ' WHERE o.buyer_id=? ORDER BY sh.id DESC', [$u['buyer_id']]);
+        $ships = rows($query . ' WHERE p.coop_id=? GROUP BY sh.id ORDER BY sh.id DESC', [$u['coop_id']]);
+    } elseif ($isBuyer) {
+        $ships = rows($query . ' WHERE o.buyer_id=? GROUP BY sh.id ORDER BY sh.id DESC', [$u['buyer_id']]);
     } else {
-        $ships = rows($query . ' ORDER BY sh.id DESC');
+        $ships = rows($query . ' GROUP BY sh.id ORDER BY sh.id DESC');
     }
 
     $assignable = $manager ? rows("SELECT id, order_code FROM orders WHERE status='approved' ORDER BY id DESC") : [];
@@ -33,169 +33,187 @@ function page_shipments(array $u): void {
 
     $by = [];
     foreach ($events as $ev) $by[$ev['shipment_id']][] = $ev;
-
-    if ($manager):
 ?>
-<div class="panel p-4 bg-white border mb-4" style="border-radius:16px;">
-    <h5 class="fw-bold mb-1"><i class="bi bi-person-plus-fill me-2" style="color:var(--coco-primary)"></i>Tugaskan Driver Mitra ke Pesanan</h5>
-    <p class="helper text-muted small mb-3">Driver hanya dapat ditugaskan untuk pesanan yang telah divalidasi oleh Koperasi Induk.</p>
-    <form class="row g-3" method="post">
-        <?= csrf_input() ?>
-        <input type="hidden" name="action" value="assign_driver">
-        <div class="col-md-5">
-            <?php select_field('Pesanan Siap Kirim', 'id', array_column($assignable, 'order_code', 'id')); ?>
-        </div>
-        <div class="col-md-5">
-            <?php select_field('Driver Logistik Aktif', 'driver_id', array_column($drivers, 'name', 'id')); ?>
-        </div>
-        <div class="col-md-2 d-flex align-items-end">
-            <button class="btn btn-coco w-100 fw-bold py-2"><i class="bi bi-send-fill me-1"></i> Assign Driver</button>
-        </div>
-    </form>
-</div>
-<?php endif; ?>
 
-<div class="row g-3">
-<?php foreach ($ships as $s): ?>
-    <div class="col-xl-6">
-        <div class="panel p-4 bg-white border h-100" style="border-radius:16px;">
-            <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3">
-                <div>
-                    <span class="chip"><i class="bi bi-hash me-1"></i>PENGIRIMAN #<?= e($s['id']) ?></span>
-                    <h5 class="fw-bold mt-2 mb-1" style="color:var(--coco-primary)"><?= e($s['order_code']) ?></h5>
-                    <div class="helper text-muted small"><i class="bi bi-building me-1"></i><?= e($s['company_name']) ?> &rarr; <?= e($s['city']) ?></div>
-                </div>
-                <div><?= badge($s['status']) ?></div>
-            </div>
-            
-            <hr>
+<!-- ASSETS LEAFLET MAP & CUSTOM TRUCK ICON -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
-            <div class="row g-2 mb-3 small">
-                <div class="col-6">
-                    <div class="text-muted">Driver Mitra:</div>
-                    <strong><i class="bi bi-person-badge me-1"></i><?= e($s['driver_name']) ?></strong>
-                </div>
-                <div class="col-6">
-                    <div class="text-muted">Alamat Tujuan:</div>
-                    <strong><i class="bi bi-geo-alt me-1"></i><?= e($s['shipping_address']) ?></strong>
-                </div>
-                <div class="col-12 mt-2">
-                    <div class="text-muted">Titik Pickup Koperasi Anak:</div>
-                    <strong class="text-success"><i class="bi bi-shop me-1"></i><?= e($s['pickup_address'] ?? 'Belum tersedia') ?></strong>
-                </div>
-            </div>
-
-            <!-- FORM DRIVER UPDATE STATUS & GPS -->
-            <?php if ($driver && !in_array($s['status'], ['delivered', 'pickup_pending'], true)): 
-                $next = match($s['status']) {
-                    'assigned' => 'accepted',
-                    'accepted' => 'pickup_requested',
-                    'picked_up' => 'delivered',
-                    default => ''
-                };
-            ?>
-                <form method="post" enctype="multipart/form-data" class="p-3 mb-3 border" style="background:#F6F8F4; border-radius:12px;">
-                    <?= csrf_input() ?>
-                    <input type="hidden" name="action" value="shipment_event">
-                    <input type="hidden" name="id" value="<?= $s['id'] ?>">
-                    
-                    <div class="row g-2">
-                        <div class="col-12">
-                            <?php select_field('Aksi Tugas Driver', 'event_type', array_filter([
-                                'accepted' => 'Terima Tugas Pengiriman',
-                                'pickup_requested' => 'Ajukan Pickup Barang (Minta ACC Koperasi)',
-                                'location' => 'Update Posisi GPS / Lokasi Live',
-                                'delivered' => 'Barang Sampai Tujuan (Upload Proof)'
-                            ], fn($k) => $k === $next || ($k === 'location' && in_array($s['status'], ['accepted', 'picked_up'], true)), ARRAY_FILTER_USE_KEY)); ?>
-                        </div>
-                        <div class="col-12">
-                            <label class="form-label small fw-bold">Keterangan / Kondisi Muatan</label>
-                            <textarea class="form-control form-control-sm" name="note" rows="2" required placeholder="Contoh: Barang lengkap, kondisi segel aman"></textarea>
-                        </div>
-                        <div class="col-md-6">
-                            <label class="form-label small">Latitude</label>
-                            <input class="form-control form-control-sm" id="lat<?= $s['id'] ?>" type="number" step="any" name="latitude">
-                        </div>
-                        <div class="col-md-6">
-                            <label class="form-label small">Longitude</label>
-                            <input class="form-control form-control-sm" id="lng<?= $s['id'] ?>" type="number" step="any" name="longitude">
-                        </div>
-                        <div class="col-12">
-                            <button type="button" class="btn btn-outline-secondary btn-sm w-100" onclick="getGPS(<?= $s['id'] ?>)">
-                                <i class="bi bi-crosshair me-1"></i> Ambil Koordinat GPS HP Saya
-                            </button>
-                        </div>
-                        <div class="col-12">
-                            <label class="form-label small fw-bold">Bukti Foto / Lampiran PDF</label>
-                            <input class="form-control form-control-sm" type="file" name="proof" accept=".jpg,.jpeg,.png,.webp,.pdf">
-                        </div>
-                        <div class="col-12 mt-2">
-                            <button class="btn btn-coco btn-sm w-100 fw-bold">Kirim Update Pengiriman</button>
-                        </div>
-                    </div>
-                </form>
-            <?php endif; ?>
-
-            <!-- FORM KOPERASI ACC PICKUP DRIVER -->
-            <?php if (($manager || $u['role'] === 'coop') && $s['status'] === 'pickup_pending'): ?>
-                <div class="p-3 mb-3 border border-warning" style="background:#FFFDF0; border-radius:12px;">
-                    <strong class="text-dark"><i class="bi bi-exclamation-square-fill text-warning me-1"></i>Verifikasi Penyerahan Barang (ACC Pickup)</strong>
-                    <p class="helper small text-muted mt-1 mb-2">Driver berada di lokasi pickup. Periksa fisik dan jumlah limbah/produk sebelum menyetujui.</p>
-                    <form method="post">
-                        <?= csrf_input() ?>
-                        <input type="hidden" name="action" value="approve_pickup">
-                        <input type="hidden" name="id" value="<?= $s['id'] ?>">
-                        <textarea name="note" class="form-control form-control-sm mb-2" rows="2" placeholder="Catatan serah terima / alasan..." required></textarea>
-                        <div class="d-flex gap-2">
-                            <button name="decision" value="approved" class="btn btn-coco btn-sm fw-bold"><i class="bi bi-check-lg me-1"></i> ACC Pickup</button>
-                            <button name="decision" value="rejected" class="btn btn-outline-danger btn-sm fw-bold"><i class="bi bi-x-lg me-1"></i> Tolak Pickup</button>
-                        </div>
-                    </form>
-                </div>
-            <?php endif; ?>
-
-            <div class="helper fw-bold mb-2 small text-uppercase" style="letter-spacing:0.5px; color:#64748B"><i class="bi bi-clock-history me-1"></i>Timeline Perjalanan Logistik</div>
-            <div style="max-height:240px; overflow-y:auto;" class="border rounded p-2 bg-light">
-            <?php foreach ($by[$s['id']] ?? [] as $ev): ?>
-                <div class="pb-2 mb-2 border-bottom bg-white p-2 rounded">
-                    <div class="d-flex justify-content-between align-items-center">
-                        <strong class="small text-dark"><?= e(status_text($ev['event_type'])) ?></strong>
-                        <span class="helper small text-muted"><?= e($ev['created_at']) ?></span>
-                    </div>
-                    <p class="helper small mb-1 text-secondary"><?= e($ev['actor_name']) ?>: <?= e($ev['note']) ?></p>
-                    <div class="d-flex gap-2">
-                        <?php if ($ev['latitude'] !== null): ?>
-                            <a target="_blank" class="small text-decoration-none" rel="noopener" href="https://www.openstreetmap.org/?mlat=<?= e($ev['latitude']) ?>&mlon=<?= e($ev['longitude']) ?>#map=15/<?= e($ev['latitude']) ?>/<?= e($ev['longitude']) ?>">
-                                <i class="bi bi-geo-alt-fill me-1"></i>Peta GPS
-                            </a>
-                        <?php endif; ?>
-                        <?php if ($ev['proof_path']): ?>
-                            <a class="small text-decoration-none text-success fw-bold" href="<?= e(app_base() . '/download.php?id=' . $ev['id']) ?>" target="_blank">
-                                <i class="bi bi-file-earmark-arrow-down-fill me-1"></i>Bukti Foto / PDF ↗
-                            </a>
-                        <?php endif; ?>
-                    </div>
-                </div>
-            <?php endforeach; ?>
+<div class="card border-0 shadow-sm mb-4" style="border-radius:16px; background: linear-gradient(135deg, #164B35 0%, #1D5C43 100%); color:white;">
+    <div class="card-body p-4">
+        <div class="d-flex align-items-center gap-3">
+            <div class="p-3 rounded-circle bg-white bg-opacity-20 fs-3 text-white"><i class="bi bi-truck-front-fill"></i></div>
+            <div>
+                <h5 class="fw-bold mb-1 text-white">Live Tracking Logistik & Route Simulation</h5>
+                <p class="mb-0 small text-white-50">Monitoring titik pergerakan armada driver dari Gudang Koperasi Anak menuju Alamat Industri Pembeli.</p>
             </div>
         </div>
     </div>
+</div>
+
+<?php if ($manager): ?>
+<div class="card border-0 shadow-sm mb-4" style="border-radius:16px;">
+    <div class="card-body p-4">
+        <h5 class="fw-bold mb-1 text-dark"><i class="bi bi-person-plus-fill me-2" style="color:#164B35"></i>Tugaskan Driver Armada ke Pesanan</h5>
+        <form class="row g-3" method="post">
+            <?= csrf_input() ?>
+            <input type="hidden" name="action" value="assign_driver">
+            <div class="col-md-5">
+                <?php select_field('Pilih Order Disetujui', 'id', array_column($assignable, 'order_code', 'id')); ?>
+            </div>
+            <div class="col-md-5">
+                <?php select_field('Pilih Driver Armada', 'driver_id', array_column($drivers, 'name', 'id')); ?>
+            </div>
+            <div class="col-md-2 d-flex align-items-end mb-3">
+                <button class="btn btn-coco w-100 fw-bold py-2 shadow-sm" style="border-radius:10px;"><i class="bi bi-send-fill me-1"></i> Assign Driver</button>
+            </div>
+        </form>
+    </div>
+</div>
+<?php endif; ?>
+
+<div class="row g-4">
+<?php foreach ($ships as $s): 
+    $startLat = -6.8915; $startLng = 107.5981; // Bandung (Gudang Koperasi)
+    $destLat  = -6.1923; $destLng  = 106.9123; // Jakarta (Tujuan Pembeli)
+    $currLat  = $s['curr_lat'] ? (float)$s['curr_lat'] : $startLat;
+    $currLng  = $s['curr_lng'] ? (float)$s['curr_lng'] : $startLng;
+?>
+    <div class="col-xl-6">
+        <div class="card border-0 shadow-sm h-100" style="border-radius:16px;">
+            <div class="card-body p-4">
+                <div class="d-flex justify-content-between align-items-start border-bottom pb-3 mb-3">
+                    <div>
+                        <span class="badge bg-light text-dark border mb-1"><i class="bi bi-hash me-1"></i>PENGIRIMAN #<?= e($s['id']) ?></span>
+                        <h4 class="fw-bold mb-0 text-dark"><?= e($s['order_code']) ?></h4>
+                        <div class="small text-muted mt-1"><i class="bi bi-building me-1"></i>Tujuan: <strong><?= e($s['company_name']) ?></strong> (<?= e($s['city']) ?>)</div>
+                    </div>
+                    <div><?= badge($s['status']) ?></div>
+                </div>
+
+                <!-- LIVE MAPS TRACKING SHOPEE STYLE -->
+                <div class="mb-3 rounded overflow-hidden border shadow-sm" style="height:220px; position:relative;">
+                    <div id="shipMap<?= $s['id'] ?>" style="height:100%; width:100%;"></div>
+                </div>
+
+                <div class="bg-light p-3 rounded mb-3 small">
+                    <div class="row g-2">
+                        <div class="col-6">
+                            <span class="text-muted d-block">Driver Armada:</span>
+                            <strong class="text-dark"><i class="bi bi-person-badge me-1"></i><?= e($s['driver_name']) ?></strong>
+                        </div>
+                        <div class="col-6">
+                            <span class="text-muted d-block">Asal Gudang Koperasi:</span>
+                            <strong class="text-dark"><i class="bi bi-shop me-1"></i><?= e($s['coop_name'] ?? 'Gudang Penampungan') ?></strong>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- DRIVER UPDATE FORM -->
+                <?php if ($driver && !in_array($s['status'], ['delivered', 'pickup_pending'], true)): ?>
+                    <div class="card border-success border-opacity-50 mb-3" style="border-radius:12px; background:#F4F9F6;">
+                        <div class="card-body p-3">
+                            <strong class="text-success small d-block mb-2"><i class="bi bi-truck me-1"></i>Form Update Driver & Live GPS</strong>
+                            <form method="post" enctype="multipart/form-data">
+                                <?= csrf_input() ?>
+                                <input type="hidden" name="action" value="shipment_event">
+                                <input type="hidden" name="id" value="<?= $s['id'] ?>">
+                                
+                                <div class="row g-2">
+                                    <div class="col-12">
+                                        <?php select_field('Pilih Status Rute Pengiriman', 'event_type', [
+                                            'accepted'         => '1. Terima Tugas Rute Driver',
+                                            'pickup_requested' => '2. Minta ACC Ambil Barang di Gudang Koperasi',
+                                            'location'         => '3. Perbarui Live Posisi GPS (Truk Jalan)',
+                                            'delivered'        => '4. Barang Sampai Industri (Upload Foto Bukti POD)'
+                                        ]); ?>
+                                    </div>
+                                    <div class="col-12">
+                                        <input type="text" class="form-control form-control-sm" name="note" required placeholder="Catatan posisi (misal: Tol Cikampek KM 42)">
+                                    </div>
+                                    <div class="col-6">
+                                        <input class="form-control form-control-sm" id="lat<?= $s['id'] ?>" type="number" step="any" name="latitude" value="<?= $currLat ?>">
+                                    </div>
+                                    <div class="col-6">
+                                        <input class="form-control form-control-sm" id="lng<?= $s['id'] ?>" type="number" step="any" name="longitude" value="<?= $currLng ?>">
+                                    </div>
+                                    <div class="col-12">
+                                        <button type="button" class="btn btn-outline-secondary btn-sm w-100" onclick="getGPS(<?= $s['id'] ?>)"><i class="bi bi-crosshair me-1"></i> Ambil Koordinat HP Saya</button>
+                                    </div>
+                                    <div class="col-12">
+                                        <input class="form-control form-control-sm" type="file" name="proof" accept=".jpg,.png,.pdf">
+                                    </div>
+                                    <div class="col-12 mt-2">
+                                        <button class="btn btn-coco btn-sm w-100 fw-bold">Update Rute GPS Logistik</button>
+                                    </div>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                <?php endif; ?>
+
+                <!-- ACC PICKUP GUDANG KOPERASI ANAK -->
+                <?php if (($manager || $u['role'] === 'coop') && $s['status'] === 'pickup_pending'): ?>
+                    <div class="card border-warning mb-3" style="border-radius:12px; background:#FFFDF3;">
+                        <div class="card-body p-3">
+                            <strong class="text-warning-emphasis d-block mb-1"><i class="bi bi-exclamation-circle me-1"></i>ACC Pickup Gudang Koperasi Anak</strong>
+                            <p class="small text-muted mb-2">Driver berada di lokasi gudang penampungan Koperasi Anak untuk mengambil barang.</p>
+                            <form method="post">
+                                <?= csrf_input() ?>
+                                <input type="hidden" name="action" value="approve_pickup">
+                                <input type="hidden" name="id" value="<?= $s['id'] ?>">
+                                <textarea name="note" class="form-control form-control-sm mb-2" rows="2" placeholder="Catatan serah terima fisik..." required></textarea>
+                                <div class="d-flex gap-2">
+                                    <button name="decision" value="approved" class="btn btn-success btn-sm fw-bold"><i class="bi bi-check-lg me-1"></i> ACC Pickup</button>
+                                    <button name="decision" value="rejected" class="btn btn-outline-danger btn-sm fw-bold">Tolak</button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                <?php endif; ?>
+
+                <h6 class="fw-bold text-dark mb-2 small"><i class="bi bi-clock-history me-1 text-secondary"></i> Timeline Perjalanan Logistik</h6>
+                <div style="max-height:160px; overflow-y:auto;" class="border rounded p-2 bg-light">
+                <?php foreach ($by[$s['id']] ?? [] as $ev): ?>
+                    <div class="p-2 mb-2 bg-white rounded shadow-sm border-start border-4 border-success">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <strong class="small text-dark"><?= e(status_text($ev['event_type'])) ?></strong>
+                            <span class="small text-muted"><?= e($ev['created_at']) ?></span>
+                        </div>
+                        <p class="small mb-0 text-secondary"><?= e($ev['actor_name']) ?>: "<?= e($ev['note']) ?>"</p>
+                    </div>
+                <?php endforeach; ?>
+                </div>
+            </div>
+        </div>
+    </div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    var m = L.map('shipMap<?= $s['id'] ?>').setView([<?= $currLat ?>, <?= $currLng ?>], 10);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(m);
+
+    // Dynamic Truck Icon
+    var truckIcon = L.icon({
+        iconUrl: 'https://cdn-icons-png.flaticon.com/512/754/754848.png',
+        iconSize: [36, 36],
+        iconAnchor: [18, 18]
+    });
+
+    L.marker([<?= $currLat ?>, <?= $currLng ?>], {icon: truckIcon}).addTo(m)
+        .bindPopup('<strong>Truk Driver Armada</strong><br><small><?= e($s['driver_name']) ?></small>').openPopup();
+});
+</script>
 <?php endforeach; ?>
 </div>
 
-<?php if (!$ships): ?>
-    <div class="panel p-4 bg-white border" style="border-radius:16px;">
-        <?php table_empty('Belum ada tugas pengiriman logistik.'); ?>
-    </div>
-<?php endif; ?>
-
 <script>
 function getGPS(id) {
-    if (!navigator.geolocation) return alert('GPS tidak didukung pada browser Anda.');
+    if (!navigator.geolocation) return alert('GPS tidak didukung.');
     navigator.geolocation.getCurrentPosition(p => {
         document.getElementById('lat' + id).value = p.coords.latitude.toFixed(7);
         document.getElementById('lng' + id).value = p.coords.longitude.toFixed(7);
-    }, () => alert('Gagal mengambil koordinat lokasi. Pastikan GPS aktif.'));
+    }, () => alert('Aktifkan GPS HP Anda.'));
 }
 </script>
 <?php } ?>

@@ -1,78 +1,92 @@
 <?php
 function page_orders(array $u): void {
-    $manager = is_manager($u);
-    $data    = $manager 
-        ? rows('SELECT o.*, bp.company_name, us.name AS approver FROM orders o JOIN buyer_profiles bp ON bp.id=o.buyer_id LEFT JOIN users us ON us.id=o.approved_by ORDER BY o.id DESC')
-        : rows('SELECT o.*, bp.company_name, us.name AS approver FROM orders o JOIN buyer_profiles bp ON bp.id=o.buyer_id LEFT JOIN users us ON us.id=o.approved_by WHERE o.buyer_id=? ORDER BY o.id DESC', [$u['buyer_id']]);
-        
-    $items   = rows('SELECT i.order_id, i.quantity, i.unit_price, p.name AS product_name, p.sku, c.name AS coop_name FROM order_items i JOIN products p ON p.id=i.product_id JOIN cooperatives c ON c.id=p.coop_id ORDER BY i.order_id DESC');
-    $itemsBy = [];
-    foreach ($items as $it) $itemsBy[$it['order_id']][] = $it;
+    $isCoop  = $u['role'] === 'coop';
+    $isBuyer = $u['role'] === 'buyer';
+    $isSuper = $u['role'] === 'super_admin';
+    $isInduk = $u['role'] === 'induk';
+
+    $query = "SELECT o.*, b.company_name, b.city AS buyer_city, 
+              (SELECT c.name FROM order_items i JOIN products p ON p.id=i.product_id JOIN cooperatives c ON c.id=p.coop_id WHERE i.order_id=o.id LIMIT 1) AS coop_name, 
+              (SELECT c.id FROM order_items i JOIN products p ON p.id=i.product_id JOIN cooperatives c ON c.id=p.coop_id WHERE i.order_id=o.id LIMIT 1) AS coop_id 
+              FROM orders o 
+              JOIN buyer_profiles b ON b.id=o.buyer_id";
+
+    if ($isBuyer) {
+        $orders = rows($query . " WHERE o.buyer_id=? ORDER BY o.id DESC", [$u['buyer_id']]);
+    } elseif ($isCoop) {
+        $orders = rows($query . " HAVING coop_id=? ORDER BY o.id DESC", [$u['coop_id']]);
+    } else {
+        $orders = rows($query . " ORDER BY o.id DESC");
+    }
 ?>
-<div class="notice mb-4">
-    Alur pesanan: Diajukan Pembeli &rarr; Divalidasi Koperasi Induk &rarr; Driver ditugaskan &rarr; Pengiriman &rarr; Konfirmasi Penerimaan. PDF Invoice tersedia saat pesanan disetujui.
+
+<div class="card border-0 shadow-sm mb-4" style="border-radius:16px; background: linear-gradient(135deg, #164B35 0%, #1F6348 100%); color:white;">
+    <div class="card-body p-4">
+        <div class="d-flex align-items-center gap-3">
+            <div class="p-3 rounded-circle bg-white bg-opacity-20 fs-3 text-white"><i class="bi bi-receipt-cutoff"></i></div>
+            <div>
+                <h5 class="fw-bold mb-1 text-white">Manajemen Transaksi Pesanan Industri</h5>
+                <p class="mb-0 small text-white-50">Koperasi Anak menyetujui permintaan dari Pembeli Industri dan memuat penerbitan Invoice resmi.</p>
+            </div>
+        </div>
+    </div>
 </div>
 
-<div class="panel bg-white border" style="border-radius:16px; overflow:hidden;">
-    <div class="p-3 border-bottom d-flex justify-content-between align-items-center">
-        <h5 class="fw-bold mb-0">Pesanan Industri &bull; <?= count($data) ?></h5>
-        <?php if (!$manager): ?>
-            <a class="btn btn-sm btn-coco fw-bold" href="<?= e(url('catalog')) ?>">+ Pesan dari Katalog</a>
-        <?php endif; ?>
-    </div>
-    
-    <div class="table-responsive">
-        <table class="table table-hover align-middle mb-0">
-            <thead>
-                <tr>
-                    <th>Kode / Pembeli</th>
-                    <th>Produk & Koperasi</th>
-                    <th>Tujuan</th>
-                    <th>Total</th>
-                    <th>Status</th>
-                    <th>Dokumen / Aksi</th>
-                </tr>
-            </thead>
-            <tbody>
-            <?php foreach ($data as $o): ?>
-                <tr>
-                    <td style="min-width:175px">
-                        <b><?= e($o['order_code']) ?></b>
-                        <div class="helper small text-muted"><?= e($o['company_name']) ?> &bull; <?= e(substr($o['created_at'], 0, 10)) ?></div>
-                    </td>
-                    <td>
-                    <?php foreach ($itemsBy[$o['id']] ?? [] as $i): ?>
-                        <div><strong><?= e($i['product_name']) ?></strong></div>
-                        <div class="helper small text-muted"><?= e($i['coop_name']) ?> / <?= number($i['quantity']) ?> kg &times; <?= money($i['unit_price']) ?></div>
-                    <?php endforeach; ?>
-                    </td>
-                    <td>
-                        <?= e($o['city']) ?>
-                        <div class="helper small text-muted" style="max-width:220px"><?= e($o['shipping_address']) ?></div>
-                    </td>
-                    <td class="fw-bold"><?= money($o['total']) ?></td>
-                    <td><?= badge($o['status']) ?></td>
-                    <td style="min-width:180px">
-                        <div class="d-flex flex-wrap gap-1">
-                            <?php if (!in_array($o['status'], ['requested', 'rejected'], true)): ?>
-                                <a class="btn btn-sm btn-outline-coco" href="<?= e(app_base() . '/report.php?type=invoice&id=' . $o['id'] . '&format=pdf') ?>" target="_blank">PDF Invoice</a>
+<div class="card border-0 shadow-sm" style="border-radius:16px;">
+    <div class="card-body p-0">
+        <div class="p-4 border-bottom d-flex justify-content-between align-items-center">
+            <h5 class="fw-bold mb-0 text-dark"><i class="bi bi-cart-check me-2" style="color:#164B35"></i>Daftar Pesanan &bull; <?= count($orders) ?></h5>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+                <thead class="bg-light">
+                    <tr>
+                        <th class="ps-4">Kode Transaksi</th>
+                        <th>Pembeli Industri</th>
+                        <th>Koperasi Anak Penjual</th>
+                        <th>Tujuan Pengiriman</th>
+                        <th>Total Bayar</th>
+                        <th>Status Order</th>
+                        <th class="text-center">Aksi Pesanan</th>
+                    </tr>
+                </thead>
+                <tbody>
+                <?php foreach ($orders as $ord): ?>
+                    <tr>
+                        <td class="ps-4 fw-bold text-dark"><i class="bi bi-hash text-muted"></i><?= e($ord['order_code']) ?></td>
+                        <td><strong class="text-dark"><?= e($ord['company_name']) ?></strong></td>
+                        <td><span class="badge bg-light text-dark border"><i class="bi bi-shop me-1"></i><?= e($ord['coop_name'] ?? 'Koperasi Anak') ?></span></td>
+                        <td><?= e($ord['shipping_address']) ?> (<?= e($ord['city']) ?>)</td>
+                        <td><strong class="text-success fs-6"><?= money($ord['total']) ?></strong></td>
+                        <td><?= badge($ord['status']) ?></td>
+                        <td class="text-center">
+                            <!-- ACC PESANAN OLEH KOPERASI ANAK PENJUAL -->
+                            <?php if ($isCoop && $ord['status'] === 'requested'): ?>
+                                <div class="d-flex justify-content-center gap-2">
+                                    <?php action_form('approve_order', (int)$ord['id'], 'ACC Pesanan', 'btn-success btn-sm', ['status' => 'approved']); ?>
+                                    <?php action_form('approve_order', (int)$ord['id'], 'Tolak Order', 'btn-outline-danger btn-sm', ['status' => 'rejected']); ?>
+                                </div>
                             <?php endif; ?>
-                            
-                            <?php if ($manager && $o['status'] === 'requested'): ?>
-                                <?php action_form('approve_order', (int)$o['id'], 'Setujui', 'btn-outline-coco btn-sm', ['decision' => 'approved']); ?>
-                                <?php action_form('approve_order', (int)$o['id'], 'Tolak', 'btn-outline-danger btn-sm', ['decision' => 'rejected']); ?>
+
+                            <!-- PEMBELI KONFIRMASI TERIMA BARANG -->
+                            <?php if ($isBuyer && $ord['status'] === 'delivered'): ?>
+                                <?php action_form('confirm_order_received', (int)$ord['id'], 'Konfirmasi Barang Diterima', 'btn-coco btn-sm'); ?>
                             <?php endif; ?>
-                            
-                            <?php if (!$manager && $o['status'] === 'delivered'): ?>
-                                <?php action_form('confirm_order', (int)$o['id'], 'Konfirmasi Terima', 'btn-coco btn-sm'); ?>
+
+                            <!-- CETAK INVOICE PDF -->
+                            <?php if (!in_array($ord['status'], ['requested', 'rejected'], true)): ?>
+                                <a href="<?= e(app_base() . '/report.php?type=invoice&id=' . $ord['id']) ?>" target="_blank" class="btn btn-outline-secondary btn-sm fw-bold px-3">
+                                    <i class="bi bi-file-earmark-pdf-fill me-1 text-danger"></i> Invoice PDF
+                                </a>
                             <?php endif; ?>
-                        </div>
-                    </td>
-                </tr>
-            <?php endforeach; ?>
-            </tbody>
-        </table>
-        <?php if (!$data) table_empty('Belum ada pesanan.'); ?>
+                        </td>
+                    </tr>
+                <?php endforeach; ?>
+                </tbody>
+            </table>
+            <?php if (!$orders) table_empty('Belum ada pesanan transaksi.'); ?>
+        </div>
     </div>
 </div>
 <?php } ?>
