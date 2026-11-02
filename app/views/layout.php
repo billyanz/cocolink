@@ -1,49 +1,379 @@
 <?php
-require_once __DIR__.'/../bootstrap.php';
-function page_title(string $page): string {return [
- 'dashboard'=>'Ringkasan operasional','verification'=>'Verifikasi mitra','accounts'=>'Manajemen akun',
- 'batches'=>'Pasokan limbah','allocations'=>'Distribusi ke koperasi','products'=>'Produk & produksi',
- 'orders'=>'Pesanan industri','shipments'=>'Operasional logistik','maps'=>'Peta jaringan',
- 'reports'=>'Laporan & ekspor','audit'=>'Riwayat audit','catalog'=>'Katalog industri'
- ][$page]??'CocoLink';}
-function nav_items(array $u): array {
- $items=[['dashboard','layout-dashboard','Dashboard'],['maps','map-pinned','Peta jaringan']];
- if(is_manager($u)) $items=array_merge($items,[['verification','badge-check','Verifikasi'],['batches','leaf','Pasokan limbah'],['allocations','package-check','Alokasi'],['products','boxes','Produk jadi'],['orders','shopping-cart','Pesanan'],['shipments','truck','Logistik'],['reports','file-bar-chart-2','Laporan']]);
- if($u['role']==='supplier') $items[]=['batches','leaf','Pasokan PT'];
- if($u['role']==='supplier') $items[]=['allocations','package-check','Distribusi'];
- if($u['role']==='coop') $items=array_merge($items,[['allocations','package-check','Alokasi masuk'],['products','boxes','Produksi & stok'],['shipments','truck','Validasi pickup']]);
- if($u['role']==='buyer') $items=array_merge($items,[['catalog','store','Katalog'],['orders','shopping-cart','Pesanan saya'],['shipments','truck','Lacak kiriman']]);
- if($u['role']==='driver') $items[]=['shipments','truck','Tugas kirim'];
- if($u['role']==='super_admin') $items=array_merge($items,[['accounts','users','Manajemen akun'],['audit','shield-check','Audit aktivitas']]);
- return $items;
+function render_layout(string $title, string $page, array $u, callable $content): void {
+?>
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><?= e($title) ?> &bull; CoCoLink Circular Network</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.2/font/bootstrap-icons.min.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --coco-primary: #164B35;
+            --coco-primary-dark: #0F3525;
+            --coco-accent: #C7ED8D;
+            --coco-bg: #F6F8F4;
+            --coco-border: #DCE6D9;
+            --coco-text: #24362E;
+            --sidebar-width: 260px;
+        }
+
+        body {
+            font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+            background-color: var(--coco-bg);
+            color: var(--coco-text);
+            margin: 0;
+            padding: 0;
+            overflow-x: hidden;
+        }
+
+        .app-wrapper {
+            display: flex;
+            min-height: 100vh;
+            width: 100vw;
+        }
+
+        .app-sidebar {
+            width: var(--sidebar-width);
+            background-color: var(--coco-primary-dark);
+            color: #ffffff;
+            flex-shrink: 0;
+            display: flex;
+            flex-direction: column;
+            position: fixed;
+            top: 0;
+            bottom: 0;
+            left: 0;
+            z-index: 100;
+            overflow-y: auto;
+        }
+
+        .app-main {
+            flex-grow: 1;
+            margin-left: var(--sidebar-width);
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .app-header {
+            height: 70px;
+            background: #ffffff;
+            border-bottom: 1px solid var(--coco-border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 30px;
+            position: sticky;
+            top: 0;
+            z-index: 90;
+        }
+
+        .app-content {
+            padding: 30px;
+            flex-grow: 1;
+        }
+
+        .sidebar-brand {
+            padding: 24px 20px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            border-bottom: 1px solid rgba(255,255,255,0.08);
+        }
+
+        .sidebar-brand .logo-icon {
+            width: 38px;
+            height: 38px;
+            background: var(--coco-accent);
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--coco-primary-dark);
+            font-size: 20px;
+        }
+
+        .sidebar-menu {
+            padding: 20px 12px;
+            list-style: none;
+            margin: 0;
+            flex-grow: 1;
+        }
+
+        .sidebar-menu .menu-header {
+            font-size: 10px;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 1.2px;
+            color: rgba(255,255,255,0.4);
+            padding: 12px 12px 6px;
+        }
+
+        .sidebar-menu a {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 11px 14px;
+            color: rgba(255,255,255,0.75);
+            text-decoration: none;
+            border-radius: 10px;
+            font-size: 13.5px;
+            font-weight: 500;
+            transition: all 0.2s ease;
+            margin-bottom: 3px;
+        }
+
+        .sidebar-menu a:hover {
+            color: #ffffff;
+            background: rgba(255,255,255,0.06);
+        }
+
+        .sidebar-menu a.active {
+            color: #ffffff;
+            background: var(--coco-primary);
+            font-weight: 600;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+
+        .sidebar-menu a i {
+            font-size: 17px;
+            width: 20px;
+            text-align: center;
+        }
+
+        .kpi-card {
+            background: #ffffff;
+            border: 1px solid var(--coco-border);
+            border-radius: 16px;
+            padding: 20px 24px;
+            display: flex;
+            align-items: center;
+            gap: 18px;
+            box-shadow: 0 4px 15px rgba(22, 75, 53, 0.03);
+            height: 100%;
+            min-height: 100px;
+        }
+
+        .kpi-icon {
+            width: 52px;
+            height: 52px;
+            border-radius: 12px;
+            background: var(--coco-bg);
+            border: 1px solid var(--coco-border);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 22px;
+            color: var(--coco-primary);
+            flex-shrink: 0;
+        }
+
+        .kpi-content {
+            flex-grow: 1;
+            min-width: 0;
+        }
+
+        .kpi-title {
+            font-size: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: #64748B;
+            margin-bottom: 4px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .kpi-value {
+            font-size: 26px;
+            font-weight: 800;
+            color: var(--coco-text);
+            line-height: 1.1;
+        }
+
+        .panel {
+            background: #ffffff;
+            border: 1px solid var(--coco-border);
+            border-radius: 16px;
+            box-shadow: 0 4px 20px rgba(22, 75, 53, 0.03);
+        }
+
+        .panel-pad {
+            padding: 24px;
+        }
+
+        .btn-coco {
+            background-color: var(--coco-primary);
+            color: #ffffff;
+            border: none;
+            border-radius: 10px;
+            padding: 10px 20px;
+            font-weight: 600;
+            font-size: 14px;
+            transition: all 0.2s ease;
+        }
+
+        .btn-coco:hover {
+            background-color: var(--coco-primary-dark);
+            color: #ffffff;
+            transform: translateY(-1px);
+        }
+
+        .btn-lime {
+            background-color: var(--coco-accent);
+            color: var(--coco-primary-dark);
+            border: none;
+            border-radius: 10px;
+            padding: 10px 20px;
+            font-weight: 700;
+            font-size: 14px;
+        }
+
+        .btn-lime:hover {
+            background-color: #b3e370;
+            color: var(--coco-primary-dark);
+        }
+
+        .chip {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 20px;
+            background: var(--coco-bg);
+            border: 1px solid var(--coco-border);
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--coco-primary);
+        }
+
+        .notice {
+            background: #F0F7EE;
+            border: 1px solid #C4E3BC;
+            border-radius: 12px;
+            padding: 14px 18px;
+            font-size: 13.5px;
+            color: #2D5A27;
+        }
+    </style>
+</head>
+<body>
+    <div class="app-wrapper">
+        <aside class="app-sidebar">
+            <div class="sidebar-brand">
+                <div class="logo-icon"><i class="bi bi-circle-styled">🥥</i></div>
+                <div>
+                    <div class="fw-bold" style="font-size: 16px; letter-spacing: -0.3px;">CocoLink</div>
+                    <div style="font-size: 9px; color: var(--coco-accent); letter-spacing: 1px; font-weight: 700;">CIRCULAR NETWORK</div>
+                </div>
+            </div>
+
+            <ul class="sidebar-menu">
+                <li class="menu-header">Menu Utama</li>
+                <li><a href="<?= e(url('dashboard')) ?>" class="<?= $page === 'dashboard' ? 'active' : '' ?>"><i class="bi bi-grid-1x2-fill"></i> Dashboard</a></li>
+                <li><a href="<?= e(url('maps')) ?>" class="<?= $page === 'maps' ? 'active' : '' ?>"><i class="bi bi-map-fill"></i> Peta Jaringan</a></li>
+                
+                <?php if (is_manager($u)): ?>
+                    <li><a href="<?= e(url('verification')) ?>" class="<?= $page === 'verification' ? 'active' : '' ?>"><i class="bi bi-patch-check-fill"></i> Verifikasi Mitra</a></li>
+                <?php endif; ?>
+
+                <?php if (is_manager($u) || $u['role'] === 'supplier'): ?>
+                    <li><a href="<?= e(url('batches')) ?>" class="<?= $page === 'batches' ? 'active' : '' ?>"><i class="bi bi-box-seam-fill"></i> Pasokan Limbah</a></li>
+                <?php endif; ?>
+
+                <?php if (is_manager($u) || $u['role'] === 'supplier' || $u['role'] === 'coop'): ?>
+                    <li><a href="<?= e(url('allocations')) ?>" class="<?= $page === 'allocations' ? 'active' : '' ?>"><i class="bi bi-arrow-left-right"></i> Alokasi Bahan</a></li>
+                <?php endif; ?>
+
+                <?php if (is_manager($u) || $u['role'] === 'coop'): ?>
+                    <li><a href="<?= e(url('products')) ?>" class="<?= $page === 'products' ? 'active' : '' ?>"><i class="bi bi-boxes"></i> Produk Jadi</a></li>
+                <?php endif; ?>
+
+                <?php if ($u['role'] === 'buyer'): ?>
+                    <li><a href="<?= e(url('catalog')) ?>" class="<?= $page === 'catalog' ? 'active' : '' ?>"><i class="bi bi-shop"></i> Katalog Produk</a></li>
+                <?php endif; ?>
+
+                <?php if (is_manager($u) || $u['role'] === 'buyer'): ?>
+                    <li><a href="<?= e(url('orders')) ?>" class="<?= $page === 'orders' ? 'active' : '' ?>"><i class="bi bi-cart-check-fill"></i> Pesanan Industri</a></li>
+                <?php endif; ?>
+
+                <li><a href="<?= e(url('shipments')) ?>" class="<?= $page === 'shipments' ? 'active' : '' ?>"><i class="bi bi-truck"></i> Logistik & Driver</a></li>
+
+                <?php if (is_manager($u)): ?>
+                    <li class="menu-header">Platform Admin</li>
+                    <li><a href="<?= e(url('reports')) ?>" class="<?= $page === 'reports' ? 'active' : '' ?>"><i class="bi bi-file-earmark-bar-graph-fill"></i> Laporan Lanjutan</a></li>
+                    <?php if ($u['role'] === 'super_admin'): ?>
+                        <li><a href="<?= e(url('accounts')) ?>" class="<?= $page === 'accounts' ? 'active' : '' ?>"><i class="bi bi-people-fill"></i> Manajemen Akun</a></li>
+                        <li><a href="<?= e(url('audit')) ?>" class="<?= $page === 'audit' ? 'active' : '' ?>"><i class="bi bi-shield-check"></i> Audit Aktivitas</a></li>
+                    <?php endif; ?>
+                <?php endif; ?>
+            </ul>
+        </aside>
+
+        <div class="app-main">
+            <header class="app-header">
+                <div>
+                    <span class="text-muted small">Operasional / </span>
+                    <span class="fw-bold text-capitalize"><?= str_replace('_', ' ', $page) ?></span>
+                </div>
+                <div class="d-flex align-items-center gap-3">
+                    <span class="badge px-3 py-2" style="background:#F6F8F4; color:#164B35; border:1px solid #DCE6D9; font-weight:700;">
+                        <i class="bi bi-person-badge me-1"></i> <?= e(str_replace('_', ' ', strtoupper($u['role']))) ?>
+                    </span>
+                    <div class="fw-bold" style="font-size:14px;"><?= e($u['name']) ?></div>
+                    <form method="post" action="<?= e(url('logout')) ?>" style="margin:0;">
+                        <?= csrf_input() ?>
+                        <input type="hidden" name="action" value="logout">
+                        <button class="btn btn-sm btn-outline-danger px-3" style="border-radius:8px;"><i class="bi bi-box-arrow-right"></i> Keluar</button>
+                    </form>
+                </div>
+            </header>
+
+            <main class="app-content">
+                <?php $content(); ?>
+            </main>
+        </div>
+    </div>
+</body>
+</html>
+<?php
 }
-function render_header(string $page, array $u): void {
- $title=page_title($page); $f=take_flash(); $roleNames=['super_admin'=>'Super Admin Platform','induk'=>'Admin Koperasi Induk','supplier'=>'PT Pemasok','coop'=>'Koperasi Anak','buyer'=>'Pembeli Industri','driver'=>'Driver Logistik'];
- ?>
-<!doctype html><html lang="id"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title><?=e($title)?> · CocoLink</title>
-<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/lucide-static/0.468.0/font/lucide.css">
-<style>
-:root{--forest:#123f35;--forest2:#0d2924;--mint:#d9f7b0;--cream:#f7f8f4;--ink:#172a26;--muted:#667773;--line:#e3eae5}
-*{box-sizing:border-box}body{background:var(--cream);font-family:'DM Sans',Arial,sans-serif;color:var(--ink);font-size:14px}h1,h2,h3,h4,h5,h6,.brand{font-family:Manrope,Arial,sans-serif;letter-spacing:-.04em}a{text-decoration:none}.app{min-height:100vh;display:flex}.sidebar{width:252px;min-width:252px;background:var(--forest2);color:#e5f2ee;min-height:100vh;position:sticky;top:0;height:100vh;display:flex;flex-direction:column;padding:24px 16px}.brand{font-weight:800;font-size:23px;color:#fff;display:flex;align-items:center;gap:11px;padding:4px 12px 30px}.brand-mark{background:var(--mint);color:#174537;width:36px;height:36px;border-radius:12px;display:grid;place-items:center;font-size:20px}.brand small{display:block;color:#a9d4c7;font:500 10px 'DM Sans',sans-serif;letter-spacing:1.8px}.nav-caption{font-size:10px;letter-spacing:2px;color:#8cb0a6;padding:13px 14px;font-weight:700}.sidebar .nav-link{color:#a9c0b8;padding:11px 14px;border-radius:11px;display:flex;align-items:center;gap:12px;margin:2px 0;font-weight:600}.sidebar .nav-link i{font-size:19px}.sidebar .nav-link:hover,.sidebar .nav-link.active{background:#285448;color:#fff}.sidebar .nav-link.active{box-shadow:inset 3px 0 0 var(--mint)}.sidebar-footer{margin-top:auto;padding:15px 12px 0;border-top:1px solid #35574e;color:#9db8af;font-size:11px}.main{flex:1;min-width:0}.topbar{height:83px;background:#fff;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;padding:0 36px}.main-content{max-width:1540px;margin:auto;padding:30px 36px 70px}.page-kicker{font-size:11px;font-weight:800;letter-spacing:1.6px;color:#729084;text-transform:uppercase}.page-title{font-weight:800;font-size:29px;margin:5px 0 7px}.subtitle{color:var(--muted)}.panel{border:1px solid var(--line);background:#fff;border-radius:18px;box-shadow:0 8px 26px #16312605;overflow:hidden}.panel-pad{padding:23px}.panel h5{font-size:16px;font-weight:800}.kpi{padding:22px 22px 20px;min-height:144px;position:relative}.kpi-label{font-size:12px;font-weight:700;color:#71807c;letter-spacing:.2px}.kpi-value{font:800 30px Manrope;margin-top:13px;letter-spacing:-1.6px}.kpi-icon{position:absolute;right:21px;top:20px;width:42px;height:42px;border-radius:13px;background:#eaf3ec;color:#336e50;display:grid;place-items:center;font-size:21px}.btn-coco{background:var(--forest);border:1px solid var(--forest);color:#fff;font-weight:700;border-radius:10px;padding:10px 17px}.btn-coco:hover{background:#205f50;color:white}.btn-lime{background:var(--mint);border:1px solid var(--mint);color:#193a31;font-weight:800;border-radius:11px;padding:10px 17px}.btn-lime:hover{background:#c7e99d;color:#193a31}.btn-outline-coco{border:1px solid #b4d0be;color:#1a5948;border-radius:10px;font-weight:700}.btn-outline-coco:hover{background:#e4f1e7}.table{font-size:13px;margin-bottom:0}.table th{font-size:11px;white-space:nowrap;font-weight:800;color:#6b8179;text-transform:uppercase;letter-spacing:.65px;background:#f8faf8;padding:14px}.table td{vertical-align:middle;border-color:#f0f3f0;padding:14px}.table>tbody>tr:hover{background:#fafcf9}.form-label{font-weight:700;color:#445a52;font-size:12px;margin-bottom:7px}.form-control,.form-select{border-color:#dae4de;border-radius:10px;padding:10px 12px;font-size:13px}.form-control:focus,.form-select:focus{border-color:#81ac8c;box-shadow:0 0 0 .19rem #8bc49e25}.helper{font-size:12px;color:#71827b}.empty-state{padding:34px 16px;color:#72877d;text-align:center}.section-title{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:15px}.section-title h5{margin:0}.hero-panel{background:var(--forest);border-radius:19px;color:white;padding:28px;position:relative;overflow:hidden}.hero-panel:after{content:'';position:absolute;right:-70px;top:-90px;width:260px;height:260px;border:52px solid #75a88c3b;border-radius:50%}.hero-panel p{max-width:620px;color:#c5ded5}.icon-chip{height:36px;width:36px;border-radius:10px;background:#ecf5ed;display:inline-grid;place-items:center;color:#4b7664}.mini{font-size:12px}.stat-line{display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--line)}.badge{font-size:10px;padding:7px 9px}.chip{background:#eaf2ea;color:#225c4a;border-radius:100px;padding:6px 11px;font-size:11px;font-weight:800}.mobile-top{display:none}.form-card{max-width:1100px}.tagline{font-size:12px;color:#708077}.key-number{font:800 35px Manrope;letter-spacing:-2px;color:#224c3f}.notice{padding:13px 16px;border:1px solid #d9e7d1;border-radius:12px;background:#f2f8e9;color:#375a33;font-size:12px}.map-box{height:440px;border-radius:13px;overflow:hidden;background:#ecf3eb}.print-only{display:none}
-@media(max-width:1100px){.sidebar{width:205px;min-width:205px}.topbar,.main-content{padding-left:21px;padding-right:21px}.sidebar .nav-link{font-size:12px}}
-@media(max-width:780px){.app{display:block}.sidebar{position:static;width:100%;height:auto;min-height:0;padding:10px 13px}.sidebar .brand{padding:6px 8px 9px}.sidebar .brand small,.sidebar-footer,.nav-caption{display:none}.sidebar nav{display:flex;gap:3px;overflow:auto}.sidebar .nav-link{white-space:nowrap;padding:9px 10px;margin:0}.sidebar .nav-link i{font-size:15px}.topbar{height:70px}.main-content{padding:22px 15px 50px}.page-title{font-size:24px}.topbar small{display:none}}
-@media print{.sidebar,.topbar,.no-print,.btn,form{display:none!important}.app{display:block}.main-content{padding:0}.panel{border:0;box-shadow:none}.table th,.table td{padding:6px}.print-only{display:block}}
-</style></head><body><div class="app"><aside class="sidebar"><a class="brand" href="<?=e(url())?>"><span class="brand-mark"><i class="icon icon-leaf"></i></span><span>CocoLink<small>CIRCULAR NETWORK</small></span></a><div class="nav-caption">MENU UTAMA</div><nav class="flex-grow-1">
-<?php foreach(nav_items($u) as [$target,$ic,$label]):?><a class="nav-link <?=$page===$target?'active':''?>" href="<?=e(url($target))?>"><i class="icon icon-<?=e($ic)?>"></i><span><?=e($label)?></span></a><?php endforeach;?></nav>
-<div class="sidebar-footer">© <?=date('Y')?> CocoLink<br>Sistem sirkular limbah kelapa</div></aside><main class="main"><header class="topbar"><div><strong style="font-size:13px">Operasional / <?=e($title)?></strong><small class="d-block text-muted">Pantau rantai pasok dari sumber hingga industri</small></div><div class="d-flex align-items-center gap-3"><span class="d-none d-md-inline chip"><?=e($roleNames[$u['role']]??'Pengguna')?></span><span class="rounded-circle d-inline-grid align-items-center justify-content-center text-white" style="display:inline-grid!important;width:36px;height:36px;background:#265e4c;font-weight:800"><?=e(initials($u['name']))?></span><form method="post" style="margin:0"><?=csrf_input()?><input type="hidden" name="action" value="logout"><button class="btn btn-sm btn-outline-secondary" type="submit">Keluar</button></form></div></header><div class="main-content">
-<div class="mb-4"><div class="page-kicker">COCOLINK / <?=date('d M Y')?></div><h1 class="page-title"><?=e($title)?></h1><div class="subtitle">Halo, <?=e($u['name'])?>. <?=e($roleNames[$u['role']]??'')?></div></div>
-<?php if($f):?><div class="alert alert-<?=e($f['kind'])?> border-0 mb-4"><?=e($f['message'])?></div><?php endif;?>
-<?php }
-function render_footer(): void { ?>
-</div></main></div><script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script><script>
-// Refresh otomatis dashboard mendekati real-time; tidak memakai websocket.
-if(new URLSearchParams(location.search).get('page')==='dashboard') setInterval(()=>{if(!document.hidden)location.reload()},30000);
-function setGeo(latId='latitude',lonId='longitude'){if(!navigator.geolocation){alert('Browser tidak mendukung GPS');return;}navigator.geolocation.getCurrentPosition(p=>{document.getElementById(latId).value=p.coords.latitude.toFixed(7);document.getElementById(lonId).value=p.coords.longitude.toFixed(7);},()=>alert('Izin lokasi ditolak atau lokasi tidak tersedia.'));}
-</script></body></html>
-<?php }
-function table_empty(string $text='Belum ada data'): void {echo '<div class="empty-state"><div style="font-size:32px;margin-bottom:8px">◌</div>'.e($text).'</div>';}
-function field(string $label,string $name,string $type='text',string $value='',string $extra='required'): void {echo '<label class="form-label" for="'.e($name).'">'.e($label).'</label><input class="form-control" type="'.e($type).'" id="'.e($name).'" name="'.e($name).'" value="'.e($value).'" '.$extra.'>';}
-function select_field(string $label,string $name,array $opts,string $selected='',string $extra='required'): void {echo '<label class="form-label" for="'.e($name).'">'.e($label).'</label><select class="form-select" name="'.e($name).'" id="'.e($name).'" '.$extra.'><option value="">-- Pilih --</option>';foreach($opts as $id=>$name2)echo '<option value="'.e($id).'" '.((string)$id===$selected?'selected':'').'>'.e($name2).'</option>';echo '</select>';}
-function action_form(string $action,int $id,string $button,string $buttonClass='btn-outline-coco',array $data=[]): void {echo '<form class="d-inline" method="post">'.csrf_input().'<input type="hidden" name="action" value="'.e($action).'"><input type="hidden" name="id" value="'.$id.'">';foreach($data as $k=>$v)echo '<input type="hidden" name="'.e($k).'" value="'.e($v).'">';echo '<button class="btn btn-sm '.e($buttonClass).'">'.e($button).'</button></form>';}
+
+function kpi(string $label, $val, string $icon = 'box'): void {
+    $iconMap = [
+        'map-pin' => 'bi-geo-alt-fill',
+        'network' => 'bi-diagram-3-fill',
+        'building' => 'bi-building-fill',
+        'building-2' => 'bi-buildings-fill',
+        'shopping-bag' => 'bi-bag-check-fill',
+        'truck' => 'bi-truck',
+        'package' => 'bi-box-seam-fill',
+        'arrow-right-left' => 'bi-arrow-left-right',
+        'leaf' => 'bi-tree-fill',
+        'clock' => 'bi-clock-history',
+        'box' => 'bi-box-fill',
+        'boxes' => 'bi-boxes',
+        'factory' => 'bi-building-gear',
+        'shopping-cart' => 'bi-cart-fill',
+        'check-circle' => 'bi-check-circle-fill',
+        'wallet' => 'bi-wallet2',
+        'bell' => 'bi-bell-fill',
+        'route' => 'bi-signpost-split-fill'
+    ];
+    $biClass = $iconMap[$icon] ?? 'bi-app-indicator';
+?>
+    <div class="kpi-card">
+        <div class="kpi-icon">
+            <i class="bi <?= $biClass ?>"></i>
+        </div>
+        <div class="kpi-content">
+            <div class="kpi-title"><?= e($label) ?></div>
+            <div class="kpi-value"><?= e((string)$val) ?></div>
+        </div>
+    </div>
+<?php } ?>
