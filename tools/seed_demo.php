@@ -17,16 +17,19 @@ if ((int)val('SELECT COUNT(*) FROM users') > 0) {
     exit(1);
 }
 
-$pwd = 'CocoLink!2026';
-$h   = password_hash($pwd, PASSWORD_DEFAULT);
+$pwdStrong = 'CocoLink!2026'; // Khusus Super Admin
+$pwdSimple = '123456';        // Untuk semua akun demo lainnya
+
+$hashStrong = password_hash($pwdStrong, PASSWORD_DEFAULT);
+$hashSimple = password_hash($pwdSimple, PASSWORD_DEFAULT);
 
 db()->beginTransaction();
 
 try {
     // Helper function untuk membuat akun user
-    $makeUser = function (string $name, string $email, string $role, ?int $sid = null, ?int $cid = null, ?int $bid = null) use ($h): int {
+    $makeUser = function (string $name, string $email, string $role, string $hash, ?int $sid = null, ?int $cid = null, ?int $bid = null): int {
         sql('INSERT INTO users(name,email,password_hash,role,supplier_id,coop_id,buyer_id) VALUES (?,?,?,?,?,?,?)', [
-            $name, $email, $h, $role, $sid, $cid, $bid
+            $name, $email, $hash, $role, $sid, $cid, $bid
         ]);
         return (int)db()->lastInsertId();
     };
@@ -34,16 +37,16 @@ try {
     echo "📦 1. Membuat akun pengguna dan entitas mitra...\n";
 
     // 1. Akun Super Admin & Koperasi Induk
-    $admin = $makeUser('Super Admin CoCoLink', 'admin@cocolink.test', 'super_admin');
-    $induk = $makeUser('Admin Koperasi Induk', 'induk@cocolink.test', 'induk');
+    $admin = $makeUser('Super Admin CoCoLink', 'admin@cocolink.test', 'super_admin', $hashStrong);
+    $induk = $makeUser('Admin Koperasi Induk', 'induk@cocolink.test', 'induk', $hashSimple);
 
     // 2. PT Pemasok Limbah Utama (Verified)
     sql("INSERT INTO suppliers(legal_name, nib, province, city, address, latitude, longitude, status, verified_by, verified_at) 
          VALUES ('PT Demo Nusantara Kelapa', 'DEMO-NIB-999', 'Jawa Barat', 'Bandung', 'Jl. Sukajadi No. 102, Bandung', -6.8915000, 107.5981000, 'verified', ?, NOW())", [$induk]);
     $sid = (int)db()->lastInsertId();
-    $supplierUser = $makeUser('Manajer PT Demo', 'pt@cocolink.test', 'supplier', $sid);
+    $supplierUser = $makeUser('Manajer PT Demo', 'pt@cocolink.test', 'supplier', $hashSimple, $sid);
 
-    // 3. 5 Koperasi Anak Wilayah (Syarat Syah PT Pemasok)
+    // 3. 5 Koperasi Anak Wilayah
     $coopNames = [
         'Koperasi Hijau Daun (Bandung)',
         'Koperasi Arang Tempurung (Cimahi)',
@@ -63,17 +66,17 @@ try {
         $coopIds[] = (int)db()->lastInsertId();
     }
 
-    // Akun Pengelola Koperasi Anak #1 (Spesialis Daun)
-    $coopUser = $makeUser('Ketua Koperasi Daun', 'anak@cocolink.test', 'coop', null, $coopIds[0]);
+    // Akun Pengelola Koperasi Anak #1 (Koperasi Hijau Daun - Spesialis Daun)
+    $coopUser = $makeUser('Ketua Koperasi Daun', 'anak@cocolink.test', 'coop', $hashSimple, null, $coopIds[0]);
 
     // 4. Pembeli Industri B2B (Verified)
     sql("INSERT INTO buyer_profiles(company_name, buyer_type, nib, address, city, status) 
          VALUES ('PT Industri Ekosistem Hijau', 'industry', 'DEMO-BUY-888', 'Kawasan Industri Pulogadung, Jakarta Timur', 'Jakarta', 'verified')");
     $bid = (int)db()->lastInsertId();
-    $buyerUser = $makeUser('Purchasing Manufaktur', 'buyer@cocolink.test', 'buyer', null, null, $bid);
+    $buyerUser = $makeUser('Purchasing Manufaktur', 'buyer@cocolink.test', 'buyer', $hashSimple, null, null, $bid);
 
     // 5. Driver Logistik
-    $driverUser = $makeUser('Budi Logistik Driver', 'driver@cocolink.test', 'driver');
+    $driverUser = $makeUser('Budi Logistik Driver', 'driver@cocolink.test', 'driver', $hashSimple);
 
     echo "⚙️ 2. Mensimulasikan alur bisnis pasokan limbah hingga produksi...\n";
 
@@ -82,7 +85,7 @@ try {
          VALUES (?, 1, 'RAW-DEMO-001', 1000.00, 'kg', 'Pasokan Daun Kelapa Segar dari Perkebunan')", [$sid]);
     $rawId = (int)db()->lastInsertId();
 
-    // 7. Koperasi Induk Mengalokasikan Limbah ke Koperasi Anak
+    // 7. Koperasi Induk Mengalokasikan Limbah ke Koperasi Anak (Koperasi Hijau Daun)
     sql("INSERT INTO allocations(batch_id, coop_id, quantity, status, created_by) 
          VALUES (?, ?, 500.00, 'accepted', ?)", [$rawId, $coopIds[0], $induk]);
     $allocId = (int)db()->lastInsertId();
@@ -113,7 +116,7 @@ try {
 
     // Detail Item Pesanan & Pengurangan Stok
     sql("INSERT INTO order_items(order_id, product_id, quantity, unit_price) VALUES (?, ?, 50.00, 15000.00)", [$orderId, $productId]);
-    sql("UPDATE products SET stock=stock-50.00 WHERE id=?", [$productId]); // Stok tersisa 250 kg
+    sql("UPDATE products SET stock=stock-50.00 WHERE id=?", [$productId]);
 
     // 11. Pengiriman Logistik (Shipment) Berstatus Delivered
     sql("INSERT INTO shipments(order_id, driver_id, status, assigned_at, picked_up_at, delivered_at) 
@@ -123,41 +126,36 @@ try {
     $shipmentId = (int)db()->lastInsertId();
 
     // 12. Rekam Peristiwa Timeline Logistik (Events)
-    // Event 1: Assigned oleh Induk
     sql("INSERT INTO shipment_events(shipment_id, event_type, note, actor_id, created_at) 
          VALUES (?, 'assigned', 'Driver ditugaskan oleh Koperasi Induk', ?, NOW() - INTERVAL 2 DAY)", [$shipmentId, $induk]);
 
-    // Event 2: Driver Terima Tugas
     sql("INSERT INTO shipment_events(shipment_id, event_type, note, actor_id, created_at) 
          VALUES (?, 'accepted', 'Driver siap mengambil barang di Gudang Koperasi', ?, NOW() - INTERVAL 42 HOUR)", [$shipmentId, $driverUser]);
 
-    // Event 3: Driver Minta Pickup & ACC Koperasi Anak
     sql("INSERT INTO shipment_events(shipment_id, event_type, note, actor_id, created_at) 
          VALUES (?, 'picked_up', 'Persetujuan ACC Pickup oleh Koperasi Anak (Muatan 50 kg Sapu Lidi)', ?, NOW() - INTERVAL 24 HOUR)", [$shipmentId, $coopUser]);
 
-    // Event 4: Live Location Tracking GPS
     sql("INSERT INTO shipment_events(shipment_id, event_type, note, latitude, longitude, actor_id, created_at) 
          VALUES (?, 'location', 'Dalam perjalanan di Tol Cikampek KM 42', -6.3412000, 107.1523000, ?, NOW() - INTERVAL 5 HOUR)", [$shipmentId, $driverUser]);
 
-    // Event 5: Barang Sampai Tujuan (Delivered) oleh Driver
     sql("INSERT INTO shipment_events(shipment_id, event_type, note, latitude, longitude, actor_id, created_at) 
-         VALUES (?, 'delivered', 'Barang telah diserahterimakan ke tim Gudang Industri. Kondisi segel utuh.', -6.1923000, 106.9123000, ?, NOW())", [$shipmentId, $driverUser]);
+         VALUES (?, 'delivered', 'Barang telah diserahterimakan ke tim Gudang Industri.', -6.1923000, 106.9123000, ?, NOW())", [$shipmentId, $driverUser]);
 
-    // 13. Audit Log System
+    // Audit Log
     audit($admin, 'seed_demo', 'system', null, 'Inisialisasi Data Demo Transaksi Selesai CoCoLink');
 
     db()->commit();
 
     echo " SUCCESS! Seed Data Demo Berhasil Dipasang.\n";
     echo "=================================================================\n";
-    echo " KREDENSIAL LOGIN SIMULASI DEMO (Password Semua Akun: {$pwd}):\n";
+    echo " KREDENSIAL LOGIN AKUN DEMO:\n";
     echo "=================================================================\n";
-    echo " 1. Super Admin Platform : admin@cocolink.test\n";
-    echo " 2. Admin Koperasi Induk: induk@cocolink.test\n";
-    echo " 3. PT Pemasok Limbah    : pt@cocolink.test\n";
-    echo " 4. Koperasi Anak        : anak@cocolink.test\n";
-    echo " 5. Pembeli Industri     : buyer@cocolink.test\n";
-    echo " 6. Driver Logistik      : driver@cocolink.test\n";
+    echo " 1. Super Admin Platform : admin@cocolink.test  [ Password: {$pwdStrong} ]\n";
+    echo " 2. Admin Koperasi Induk: induk@cocolink.test  [ Password: {$pwdSimple} ]\n";
+    echo " 3. PT Pemasok Limbah    : pt@cocolink.test     [ Password: {$pwdSimple} ]\n";
+    echo " 4. Koperasi Anak        : anak@cocolink.test   [ Password: {$pwdSimple} ]\n";
+    echo " 5. Pembeli Industri     : buyer@cocolink.test  [ Password: {$pwdSimple} ]\n";
+    echo " 6. Driver Logistik      : driver@cocolink.test [ Password: {$pwdSimple} ]\n";
     echo "=================================================================\n";
 
 } catch (Throwable $ex) {

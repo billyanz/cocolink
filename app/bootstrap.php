@@ -98,7 +98,7 @@ function csrf_input(): string {
 
 function require_csrf(): void {
     if (!hash_equals(csrf(), (string)($_POST['csrf'] ?? ''))) {
-        throw new RuntimeException('Token keamanan formulir kedaluwarsa. Muat ulang halaman.');
+        throw new RuntimeException('Sesi formulir telah berakhir demi keamanan. Silakan muat ulang halaman.');
     }
 }
 
@@ -123,7 +123,7 @@ function user(): array {
 function must_role(array $roles): array {
     $u = user();
     if (!in_array($u['role'], $roles, true)) {
-        throw new RuntimeException('Anda tidak memiliki akses untuk tindakan ini.');
+        throw new RuntimeException('Anda tidak memiliki hak akses untuk membuka halaman ini.');
     }
     return $u;
 }
@@ -146,7 +146,7 @@ function take_flash(): ?array {
 function required_str(string $key, int $max = 255): string {
     $v = trim((string)($_POST[$key] ?? ''));
     if ($v === '' || uni_len($v) > $max) {
-        throw new RuntimeException('Isian ' . str_replace('_', ' ', $key) . ' wajib dan maksimal ' . $max . ' karakter.');
+        throw new RuntimeException('Kolom ' . str_replace('_', ' ', $key) . ' wajib diisi (maksimal ' . $max . ' karakter).');
     }
     return $v;
 }
@@ -154,7 +154,7 @@ function required_str(string $key, int $max = 255): string {
 function post_id(string $key): int {
     $id = filter_var($_POST[$key] ?? null, FILTER_VALIDATE_INT);
     if (!$id || $id < 1) {
-        throw new RuntimeException('ID ' . e($key) . ' tidak valid.');
+        throw new RuntimeException('Data ID ' . e($key) . ' tidak valid.');
     }
     return $id;
 }
@@ -162,7 +162,7 @@ function post_id(string $key): int {
 function positive(string $key): float {
     $str = str_replace(',', '.', trim((string)($_POST[$key] ?? '')));
     if (!is_numeric($str) || (float)$str <= 0) {
-        throw new RuntimeException('Nilai ' . str_replace('_', ' ', $key) . ' harus lebih dari nol.');
+        throw new RuntimeException('Jumlah ' . str_replace('_', ' ', $key) . ' harus berupa angka positif.');
     }
     return round((float)$str, 2);
 }
@@ -171,7 +171,7 @@ function coord(string $key, float $min, float $max, bool $nullable = false): ?fl
     $s = trim((string)($_POST[$key] ?? ''));
     if ($s === '' && $nullable) return null;
     if ($s === '' || !is_numeric($s) || (float)$s < $min || (float)$s > $max) {
-        throw new RuntimeException('Koordinat ' . e($key) . ' tidak valid.');
+        throw new RuntimeException('Koordinat lokasi tidak valid.');
     }
     return (float)$s;
 }
@@ -188,34 +188,34 @@ function code(string $prefix): string {
 
 function status_text(string $status): string {
     return [
-        'pending'          => 'Menunggu verifikasi',
-        'verified'         => 'Terverifikasi',
-        'rejected'         => 'Ditolak',
-        'proposed'         => 'Menunggu koperasi',
-        'accepted'         => 'Diterima',
-        'completed'        => 'Selesai',
-        'requested'        => 'Diajukan',
-        'approved'         => 'Disetujui',
-        'assigned'         => 'Driver ditugaskan',
-        'in_transit'       => 'Dalam perjalanan',
-        'pickup_pending'   => 'Pickup perlu disetujui',
-        'pickup_requested' => 'Pengajuan pickup',
-        'pickup_rejected'  => 'Pickup ditolak',
-        'picked_up'        => 'Pickup disetujui',
-        'delivered'        => 'Terkirim',
-        'location'         => 'Lokasi diperbarui'
+        'pending'          => 'Menunggu Pengesahan',
+        'verified'         => 'Mitra Resmi / Terverifikasi',
+        'rejected'         => 'Ditolak / Perlu Perbaikan',
+        'proposed'         => 'Menunggu Persetujuan Koperasi',
+        'accepted'         => 'Telah Diterima Koperasi',
+        'completed'        => 'Transaksi Selesai & Berhasil',
+        'requested'        => 'Menunggu Persetujuan Order',
+        'approved'         => 'Pesanan Disetujui',
+        'assigned'         => 'Driver Telah Ditugaskan',
+        'in_transit'       => 'Dalam Perjalanan Pengiriman',
+        'pickup_pending'   => 'Pengajuan Pickup (Butuh ACC)',
+        'pickup_requested' => 'Driver Meminta Pickup',
+        'pickup_rejected'  => 'Pickup Ditolak Gudang',
+        'picked_up'        => 'Sudah Diambil dari Gudang',
+        'delivered'        => 'Barang Tiba di Tujuan',
+        'location'         => 'Pembaruan Posisi GPS'
     ][$status] ?? ucwords(str_replace('_', ' ', $status));
 }
 
 function badge(string $status): string {
     $color = match ($status) {
         'completed', 'verified', 'delivered' => 'success',
-        'rejected'                            => 'danger',
+        'rejected', 'pickup_rejected'        => 'danger',
         'accepted', 'approved'               => 'info',
         'in_transit', 'picked_up'            => 'primary',
         default                              => 'warning'
     };
-    return '<span class="badge rounded-pill text-bg-' . $color . ' fw-medium">' . e(status_text($status)) . '</span>';
+    return '<span class="badge rounded-pill text-bg-' . $color . ' px-3 py-2 fw-semibold" style="font-size:0.82rem;"><i class="bi bi-dot me-1"></i>' . e(status_text($status)) . '</span>';
 }
 
 function initials(string $name): string {
@@ -224,79 +224,91 @@ function initials(string $name): string {
 }
 
 /* ==========================================================================
-   HELPER INPUT FORM & TAMPILAN UI (Fix field(), select_field(), action_form())
+   HELPER INPUT FORM & TAMPILAN ELEGAN (KPI, Field, Select, Action)
    ========================================================================== */
 
 /**
- * Render Input Text/Number/Password Field
+ * HELPER KPI CARD (Fix undefined function kpi)
  */
-function field(string $label, string $name, string $type = 'text', string $value = '', string $attributes = 'required'): void {
+function kpi(string $label, mixed $val, string $icon = 'bi-activity', string $colorClass = 'text-success bg-success'): void {
 ?>
-    <label class="form-label fw-bold small text-secondary" for="<?= e($name) ?>"><?= e($label) ?></label>
-    <input type="<?= e($type) ?>" class="form-control" id="<?= e($name) ?>" name="<?= e($name) ?>" value="<?= e($value) ?>" <?= $attributes ?>>
+    <div class="card border-0 shadow-sm p-3 h-100" style="border-radius:14px;">
+        <div class="d-flex align-items-center gap-3">
+            <div class="p-3 rounded-circle <?= e($colorClass) ?> bg-opacity-10 fs-4">
+                <i class="bi <?= e($icon) ?>"></i>
+            </div>
+            <div>
+                <div class="text-muted small fw-medium"><?= e($label) ?></div>
+                <h4 class="fw-bold mb-0 text-dark"><?= is_numeric($val) ? number_format((float)$val) : e((string)$val) ?></h4>
+            </div>
+        </div>
+    </div>
 <?php
 }
 
-/**
- * Render Dropdown Select Field
- */
+function field(string $label, string $name, string $type = 'text', string $value = '', string $attributes = 'required', string $placeholder = ''): void {
+?>
+    <div class="mb-3">
+        <label class="form-label fw-semibold text-dark small mb-1" for="<?= e($name) ?>"><?= e($label) ?></label>
+        <input type="<?= e($type) ?>" class="form-control" id="<?= e($name) ?>" name="<?= e($name) ?>" value="<?= e($value) ?>" placeholder="<?= e($placeholder) ?>" <?= $attributes ?> style="border-radius:10px; padding:0.6rem 0.9rem;">
+    </div>
+<?php
+}
+
 function select_field(string $label, string $name, array $options, string $selected = '', string $attributes = 'required'): void {
 ?>
-    <label class="form-label fw-bold small text-secondary" for="<?= e($name) ?>"><?= e($label) ?></label>
-    <select class="form-select" id="<?= e($name) ?>" name="<?= e($name) ?>" <?= $attributes ?>>
-        <option value="">Pilih <?= e($label) ?></option>
-        <?php foreach ($options as $val => $txt): ?>
-            <option value="<?= e((string)$val) ?>" <?= (string)$val === (string)$selected ? 'selected' : '' ?>>
-                <?= e((string)$txt) ?>
-            </option>
-        <?php endforeach; ?>
-    </select>
+    <div class="mb-3">
+        <label class="form-label fw-semibold text-dark small mb-1" for="<?= e($name) ?>"><?= e($label) ?></label>
+        <select class="form-select" id="<?= e($name) ?>" name="<?= e($name) ?>" <?= $attributes ?> style="border-radius:10px; padding:0.6rem 0.9rem;">
+            <option value="">-- Pilih <?= e($label) ?> --</option>
+            <?php foreach ($options as $val => $txt): ?>
+                <option value="<?= e((string)$val) ?>" <?= (string)$val === (string)$selected ? 'selected' : '' ?>>
+                    <?= e((string)$txt) ?>
+                </option>
+            <?php endforeach; ?>
+        </select>
+    </div>
 <?php
 }
 
-/**
- * Render Form Action Buttons (Setujui, Tolak, Terima, dll.)
- */
 function action_form(string $action, int $id, string $label, string $btnClass = 'btn-coco btn-sm', array $extraParams = []): void {
 ?>
-    <form method="post" style="display:inline-block; margin:0;">
+    <form method="post" class="d-inline-block m-0">
         <?= csrf_input() ?>
         <input type="hidden" name="action" value="<?= e($action) ?>">
         <input type="hidden" name="id" value="<?= $id ?>">
         <?php foreach ($extraParams as $k => $v): ?>
             <input type="hidden" name="<?= e($k) ?>" value="<?= e((string)$v) ?>">
         <?php endforeach; ?>
-        <button class="btn <?= e($btnClass) ?> fw-semibold"><?= e($label) ?></button>
+        <button class="btn <?= e($btnClass) ?> fw-bold px-3 shadow-sm" style="border-radius:8px;"><?= e($label) ?></button>
     </form>
 <?php
 }
 
-/**
- * Render Tampilan Tabel Kosong
- */
-function table_empty(string $msg = 'Belum ada data tercatat.'): void {
+function table_empty(string $msg = 'Belum ada catatan data transaksi yang tersedia.'): void {
 ?>
-    <div class="p-4 text-center text-muted small">
-        <i class="bi bi-inbox fs-3 d-block mb-2"></i>
-        <?= e($msg) ?>
+    <div class="py-5 text-center text-muted">
+        <div class="display-6 mb-2 text-secondary"><i class="bi bi-inbox-fill"></i></div>
+        <div class="fw-semibold text-secondary"><?= e($msg) ?></div>
+        <small class="text-muted">Gunakan tombol atau formulir di atas untuk menambahkan data baru.</small>
     </div>
 <?php
 }
 
 function check_supplier_active(array $u): void {
     if ($u['role'] !== 'supplier' || !$u['supplier_id'] || val('SELECT status FROM suppliers WHERE id=?', [$u['supplier_id']]) !== 'verified') {
-        throw new RuntimeException('PT pemasok belum terverifikasi.');
+        throw new RuntimeException('PT Pemasok Anda belum aktif atau masih dalam tahap verifikasi.');
     }
 }
 
 function check_coop_active(array $u): void {
     if ($u['role'] !== 'coop' || !$u['coop_id'] || val('SELECT status FROM cooperatives WHERE id=?', [$u['coop_id']]) !== 'verified') {
-        throw new RuntimeException('Koperasi anak belum terverifikasi.');
+        throw new RuntimeException('Koperasi Anak Anda belum diaktifkan oleh Admin Koperasi Induk.');
     }
 }
 
 function check_buyer_active(array $u): void {
     if ($u['role'] !== 'buyer' || !$u['buyer_id'] || val('SELECT status FROM buyer_profiles WHERE id=?', [$u['buyer_id']]) !== 'verified') {
-        throw new RuntimeException('Akun pembeli belum terverifikasi.');
+        throw new RuntimeException('Akun Pembeli Industri Anda masih menunggu persetujuan legalitas.');
     }
 }
