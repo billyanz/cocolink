@@ -1,11 +1,11 @@
 <?php
 function page_allocations(array $u): void {
     $isCoop   = $u['role'] === 'coop';
-    $isInduk  = in_array($u['role'], ['induk', 'supplier'], true);
+    $isInduk  = $u['role'] === 'induk';
     $isSuper  = $u['role'] === 'super_admin';
+    $canAllocate = $isInduk || $isSuper;
 
     if ($isCoop) {
-        // AMBIL COOP ID DARI USER SEKALIGUS FALLBACK KE SUPPLIER TERIKAT DENGAN PRESISI
         $userCoopId = (int)($u['coop_id'] ?? 0);
         $userSuppId = (int)($u['supplier_id'] ?? 0);
 
@@ -31,120 +31,190 @@ function page_allocations(array $u): void {
                        ORDER BY a.id DESC");
     }
 
-    $batches = $isInduk ? rows("SELECT b.id, b.batch_code, r.name AS raw_name, b.quantity 
-                                FROM raw_batches b 
-                                JOIN raw_types r ON r.id=b.raw_type_id 
-                                " . ($u['supplier_id'] && !$isSuper ? "WHERE b.supplier_id = {$u['supplier_id']}" : "") . "
-                                ORDER BY b.id DESC") : [];
+    $batches = $canAllocate ? rows("SELECT b.id, b.batch_code, r.name AS raw_name, b.quantity 
+                                   FROM raw_batches b 
+                                   JOIN raw_types r ON r.id=b.raw_type_id 
+                                   " . ($u['supplier_id'] && !$isSuper ? "WHERE b.supplier_id = {$u['supplier_id']}" : "") . "
+                                   ORDER BY b.id DESC") : [];
 
-    $coops = $isInduk ? rows("SELECT c.id, c.name 
-                              FROM cooperatives c 
-                              WHERE c.status='verified' " . ($u['supplier_id'] && !$isSuper ? "AND c.supplier_id = {$u['supplier_id']}" : "") . "
-                              ORDER BY c.name") : [];
+    $coops = $canAllocate ? rows("SELECT c.id, c.name 
+                                 FROM cooperatives c 
+                                 WHERE c.status='verified' " . ($u['supplier_id'] && !$isSuper ? "AND c.supplier_id = {$u['supplier_id']}" : "") . "
+                                 ORDER BY c.name") : [];
 ?>
 
-<div class="card border-0 shadow-sm mb-4" style="border-radius:16px; background: linear-gradient(135deg, #164B35 0%, #1D5C43 100%); color:white;">
-    <div class="card-body p-4">
-        <div class="d-flex align-items-center gap-3">
-            <div class="p-3 rounded-circle bg-white bg-opacity-20 fs-3 text-white"><i class="bi bi-arrow-left-right"></i></div>
-            <div>
-                <h5 class="fw-bold mb-1 text-white">Alokasi Distribusi Bahan Mentah Limbah</h5>
-                <p class="mb-0 small text-white-50">
-                    <?= $isCoop ? 'Daftar pasokan limbah mentah yang dikirim dari PT Induk ke Koperasi Anak Anda.' : 'Penyaluran pasokan limbah mentah dari PT Utama ke Koperasi Anak regional.' ?>
-                </p>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+<style>
+    .allocations-container {
+        font-family: 'Plus Jakarta Sans', sans-serif; color: #0F172A;
+        animation: fadeIn 0.4s ease-out;
+    }
+    @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(8px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+
+    .ocean-banner-card {
+        background: linear-gradient(135deg, #0A2540 0%, #005691 50%, #0077B6 100%);
+        position: relative; overflow: hidden; border-radius: 20px;
+        box-shadow: 0 12px 28px -6px rgba(0, 86, 145, 0.28);
+    }
+    .banner-silhouette-bg {
+        position: absolute; top: 0; right: 0; bottom: 0; left: 0;
+        pointer-events: none; z-index: 0; overflow: hidden;
+    }
+    .banner-silhouette-bg svg {
+        position: absolute; right: -20px; bottom: -20px; height: 125%; width: auto; opacity: 0.10; fill: #FFFFFF;
+    }
+
+    .role-badge-crisp {
+        display: inline-flex; align-items: center; gap: 8px;
+        background: rgba(255, 255, 255, 0.16); backdrop-filter: blur(8px);
+        border: 1px solid rgba(255, 255, 255, 0.35); color: #FFFFFF;
+        padding: 6px 14px; border-radius: 30px; font-size: 0.75rem; font-weight: 700; text-transform: uppercase;
+    }
+    .banner-title { color: #FFFFFF; font-weight: 800; font-size: 1.85rem; letter-spacing: -0.5px; }
+    .banner-subtitle { color: #E0F2FE; font-size: 0.95rem; font-weight: 500; }
+
+    .section-card {
+        background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 18px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.02); transition: all 0.25s ease;
+    }
+    .btn-ocean-primary {
+        background-color: #0077B6; color: #FFFFFF; font-weight: 700; border-radius: 12px;
+        border: none; padding: 10px 24px; transition: all 0.2s ease; box-shadow: 0 4px 12px rgba(0, 119, 182, 0.25);
+    }
+    .btn-ocean-primary:hover { background-color: #023E8A; color: #FFFFFF; transform: translateY(-1px); }
+</style>
+
+<div class="allocations-container">
+    <div class="card border-0 mb-4 ocean-banner-card">
+        <div class="banner-silhouette-bg">
+            <svg viewBox="0 0 500 300" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg">
+                <path d="M 0,220 Q 125,180 250,220 T 500,220 L 500,300 L 0,300 Z" />
+                <path d="M 0,240 Q 125,210 250,240 T 500,240 L 500,300 L 0,300 Z" opacity="0.6" />
+                <g transform="translate(310, 10) scale(0.95)">
+                    <path d="M 140 280 Q 125 180 145 100 Q 152 100 148 280 Z" />
+                    <path d="M 145 100 Q 65 70 15 90 Q 65 60 145 100 Z" />
+                    <path d="M 145 100 Q 85 30 35 20 Q 85 25 145 100 Z" />
+                    <path d="M 145 100 Q 165 20 225 15 Q 170 30 145 100 Z" />
+                    <path d="M 145 100 Q 215 50 265 80 Q 200 70 145 100 Z" />
+                    <path d="M 145 100 Q 225 110 275 150 Q 205 120 145 100 Z" />
+                    <path d="M 145 100 Q 75 120 25 160 Q 75 130 145 100 Z" />
+                    <circle cx="137" cy="108" r="8" /><circle cx="150" cy="112" r="9" /><circle cx="143" cy="120" r="7.5" />
+                </g>
+            </svg>
+        </div>
+
+        <div class="card-body p-4 p-md-5 position-relative" style="z-index: 1;">
+            <div class="d-flex justify-content-between align-items-center flex-wrap gap-3">
+                <div>
+                    <div class="role-badge-crisp mb-3"><i class="bi bi-arrow-left-right"></i> RAW MATERIAL DISTRIBUTION</div>
+                    <h2 class="banner-title mb-2">Alokasi Distribusi Pasokan Limbah Mentah 🔄</h2>
+                    <p class="banner-subtitle mb-0">
+                        <?= $isCoop ? 'Daftar pasokan limbah mentah yang dikirim dari Koperasi Induk Sektor ke Koperasi Anak Anda.' : 'Penyaluran pasokan limbah mentah dari PT Supplier via Koperasi Induk ke Koperasi Anak binaan (Min 5 Anak).' ?>
+                    </p>
+                </div>
             </div>
         </div>
     </div>
-</div>
 
-<!-- FORM ALOKASI KHUSUS PT INDUK -->
-<?php if ($isInduk): ?>
-<div class="card border-0 shadow-sm mb-4" style="border-radius:16px;">
-    <div class="card-body p-4">
-        <h5 class="fw-bold text-dark mb-1"><i class="bi bi-send-plus-fill me-2" style="color:#164B35"></i>Kirim Alokasi Bahan ke Koperasi Anak</h5>
-        <p class="text-muted small mb-4">Pilih batch limbah mentah segar dan tentukan Koperasi Anak penerima di wilayah regional Anda.</p>
+    <?php if ($canAllocate): ?>
+    <div class="card border-0 section-card mb-4">
+        <div class="card-body p-4">
+            <h5 class="fw-bold text-dark mb-1"><i class="bi bi-send-plus-fill me-2" style="color:#0077B6"></i>Kirim Alokasi Bahan ke Koperasi Anak Sektor</h5>
+            <p class="text-muted small mb-4">Pilih batch limbah mentah dari PT Supplier dan tentukan Koperasi Anak penerima di sektor Anda.</p>
 
-        <form method="post">
-            <?= csrf_input() ?>
-            <input type="hidden" name="action" value="allocate">
+            <form method="post">
+                <?= csrf_input() ?>
+                <input type="hidden" name="action" value="allocate">
 
-            <div class="row g-3">
-                <div class="col-md-5">
-                    <?php 
-                    $batchOpts = [];
-                    foreach ($batches as $bt) {
-                        $batchOpts[$bt['id']] = $bt['batch_code'] . ' - ' . $bt['raw_name'] . ' (' . number($bt['quantity']) . ' kg)';
-                    }
-                    select_field('Pilih Batch Limbah Mentah', 'batch_id', $batchOpts);
-                    ?>
+                <div class="row g-3">
+                    <div class="col-12 col-md-5">
+                        <?php 
+                        $batchOpts = [];
+                        foreach ($batches as $bt) {
+                            $batchOpts[$bt['id']] = $bt['batch_code'] . ' - ' . $bt['raw_name'] . ' (' . number($bt['quantity']) . ' kg)';
+                        }
+                        select_field('Pilih Batch Limbah Mentah PT Supplier', 'batch_id', $batchOpts);
+                        ?>
+                    </div>
+
+                    <div class="col-12 col-md-4">
+                        <?php select_field('Pilih Koperasi Anak Tujuan', 'coop_id', array_column($coops, 'name', 'id')); ?>
+                    </div>
+
+                    <div class="col-12 col-md-3">
+                        <?php field('Jumlah Alokasi (kg)', 'quantity', 'number', '', 'required step="0.01" min="0.01"', 'Contoh: 500'); ?>
+                    </div>
+
+                    <div class="col-12 text-end mt-3">
+                        <button class="btn btn-ocean-primary">
+                            <i class="bi bi-send-fill me-1"></i> Kirim Alokasi Ke Koperasi Anak
+                        </button>
+                    </div>
                 </div>
-
-                <div class="col-md-4">
-                    <?php select_field('Pilih Koperasi Anak Tujuan', 'coop_id', array_column($coops, 'name', 'id')); ?>
-                </div>
-
-                <div class="col-md-3">
-                    <?php field('Jumlah Alokasi (kg)', 'quantity', 'number', '', 'required step="0.01" min="0.01"', 'Contoh: 500'); ?>
-                </div>
-
-                <div class="col-12 text-end mt-3">
-                    <button class="btn btn-coco fw-bold px-4 py-2 shadow-sm" style="border-radius:10px;">
-                        <i class="bi bi-send-fill me-1"></i> Kirim Alokasi Bahan
-                    </button>
-                </div>
-            </div>
-        </form>
-    </div>
-</div>
-<?php endif; ?>
-
-<!-- TABEL ALOKASI DITERIMA KOPERASI ANAK -->
-<div class="card border-0 shadow-sm" style="border-radius:16px;">
-    <div class="card-body p-0">
-        <div class="p-4 border-bottom d-flex justify-content-between align-items-center">
-            <h5 class="fw-bold mb-0 text-dark"><i class="bi bi-journal-check me-2" style="color:#164B35"></i>Daftar Alokasi Pasokan Limbah &bull; <?= count($allocs) ?></h5>
-            <span class="badge bg-light text-dark border">Distribusi Hulu &rarr; Olahan</span>
+            </form>
         </div>
+    </div>
+    <?php endif; ?>
 
-        <div class="table-responsive">
-            <table class="table table-hover align-middle mb-0">
-                <thead class="bg-light">
-                    <tr>
-                        <th class="ps-4">Kode Batch</th>
-                        <th>PT Induk Pengirim</th>
-                        <th>Koperasi Anak Penerima</th>
-                        <th>Kategori Limbah</th>
-                        <th>Volume Alokasi</th>
-                        <th>Status Penerimaan</th>
-                        <?php if ($isCoop): ?><th class="text-center">Aksi Konfirmasi</th><?php endif; ?>
-                    </tr>
-                </thead>
-                <tbody>
-                <?php foreach ($allocs as $al): ?>
-                    <tr>
-                        <td class="ps-4 fw-bold text-dark"><i class="bi bi-hash text-muted"></i><?= e($al['batch_code']) ?></td>
-                        <td><strong class="text-dark"><?= e($al['supplier_name']) ?></strong></td>
-                        <td><span class="badge bg-light text-dark border"><i class="bi bi-shop me-1"></i><?= e($al['coop_name']) ?></span></td>
-                        <td><span class="badge bg-success bg-opacity-10 text-success border border-success px-2 py-1"><?= e($al['raw_name']) ?></span></td>
-                        <td><strong class="fs-6 text-dark"><?= number($al['quantity']) ?></strong> <small class="text-muted">kg</small></td>
-                        <td><?= badge($al['status']) ?></td>
-                        <?php if ($isCoop): ?>
-                            <td class="text-center">
-                                <?php if ($al['status'] === 'proposed'): ?>
-                                    <div class="d-flex justify-content-center gap-2">
-                                        <?php action_form('respond_allocation', (int)$al['id'], 'Terima Pasokan', 'btn-success btn-sm', ['status' => 'accepted']); ?>
-                                        <?php action_form('respond_allocation', (int)$al['id'], 'Tolak', 'btn-outline-danger btn-sm', ['status' => 'rejected']); ?>
-                                    </div>
-                                <?php else: ?>
-                                    <span class="small text-muted"><i class="bi bi-check-all text-success me-1"></i>Selesai</span>
-                                <?php endif; ?>
-                            </td>
-                        <?php endif; ?>
-                    </tr>
-                <?php endforeach; ?>
-                </tbody>
-            </table>
-            <?php if (!$allocs) table_empty('Belum ada data alokasi bahan mentah yang dikirim.'); ?>
+    <div class="card border-0 section-card overflow-hidden">
+        <div class="card-body p-0">
+            <div class="p-4 border-bottom d-flex justify-content-between align-items-center flex-wrap gap-2" style="background:#F8FAFC;">
+                <h5 class="fw-bold mb-0 text-dark"><i class="bi bi-journal-check me-2" style="color:#0077B6"></i>Daftar Alokasi Pasokan Limbah &bull; <?= count($allocs) ?></h5>
+                <span class="badge bg-white text-dark border px-3 py-1.5 rounded-pill small">PT Supplier &rarr; Koperasi Induk &rarr; Koperasi Anak</span>
+            </div>
+
+            <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0">
+                    <thead style="background:#F1F5F9; font-size:0.8rem; color:#475569; text-transform:uppercase;">
+                        <tr>
+                            <th class="ps-4 py-3">Kode Batch</th>
+                            <th>PT Supplier Asal</th>
+                            <th>Koperasi Anak Penerima</th>
+                            <th>Kategori Limbah</th>
+                            <th>Volume Alokasi</th>
+                            <th>Status Penerimaan</th>
+                            <?php if ($isCoop): ?><th class="text-center">Aksi Konfirmasi</th><?php endif; ?>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    <?php foreach ($allocs as $al): ?>
+                        <tr>
+                            <td class="ps-4 fw-bold text-dark"><i class="bi bi-hash text-muted"></i><?= e($al['batch_code']) ?></td>
+                            <td><strong class="text-dark"><?= e($al['supplier_name']) ?></strong></td>
+                            <td><span class="badge bg-light text-dark border"><i class="bi bi-shop me-1"></i><?= e($al['coop_name']) ?></span></td>
+                            <td><span class="badge bg-info bg-opacity-10 text-primary border border-primary px-2.5 py-1 rounded-pill"><?= e($al['raw_name']) ?></span></td>
+                            <td><strong class="fs-6 text-dark"><?= number($al['quantity']) ?></strong> <small class="text-muted">kg</small></td>
+                            <td><?= badge($al['status']) ?></td>
+                            <?php if ($isCoop): ?>
+                                <td class="text-center">
+                                    <?php if ($al['status'] === 'proposed'): ?>
+                                        <div class="d-flex justify-content-center gap-2">
+                                            <?php action_form('respond_allocation', (int)$al['id'], 'Terima Pasokan', 'btn-success btn-sm font-semibold', ['status' => 'accepted']); ?>
+                                            <?php action_form('respond_allocation', (int)$al['id'], 'Tolak', 'btn-outline-danger btn-sm font-semibold', ['status' => 'rejected']); ?>
+                                        </div>
+                                    <?php else: ?>
+                                        <span class="small text-muted"><i class="bi bi-check-all text-success me-1"></i>Selesai</span>
+                                    <?php endif; ?>
+                                </td>
+                            <?php endif; ?>
+                        </tr>
+                    <?php endforeach; ?>
+                    </tbody>
+                </table>
+                <?php if (!$allocs): ?>
+                    <div class="p-5 text-center">
+                        <i class="bi bi-inbox fs-1 text-muted d-block mb-2"></i>
+                        <h6 class="fw-bold text-dark mb-1">Belum Ada Data Alokasi Bahan Mentah</h6>
+                        <p class="text-secondary small mb-0">Pasokan yang dialokasikan akan muncul di tabel ini.</p>
+                    </div>
+                <?php endif; ?>
+            </div>
         </div>
     </div>
 </div>
