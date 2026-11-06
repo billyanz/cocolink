@@ -1,7 +1,7 @@
 <?php
 declare(strict_types=1);
 
-function parse_gmaps_url(string $url, string $city = ''): array {
+function parse_gmaps_url(string $url): array {
     $url = trim($url);
     $lat = -6.2000000;
     $lng = 106.8166666;
@@ -21,12 +21,12 @@ function parse_gmaps_url(string $url, string $city = ''): array {
 
 function process_action(): void {
     require_csrf();
-    $u = current_user();
+    $u   = current_user();
     $act = (string)($_POST['action'] ?? '');
 
     switch ($act) {
         case 'login':
-            $email = required_str('email');
+            $email = strtolower(required_str('email', 190));
             $pass  = (string)($_POST['password'] ?? '');
             $user  = one('SELECT * FROM users WHERE email=?', [$email]);
 
@@ -37,30 +37,20 @@ function process_action(): void {
                 throw new RuntimeException('Akun Anda saat ini dinonaktifkan oleh administrator.');
             }
 
+            session_regenerate_id(true);
             $_SESSION['uid'] = (int)$user['id'];
             audit((int)$user['id'], 'login', 'users', (int)$user['id'], 'Login berhasil ke platform Jabodetabek');
             flash('Selamat datang kembali, ' . $user['name'] . '!');
             redirect('dashboard');
 
         case 'logout':
-            audit((int)$actor['id'], 'logout', 'user', (int)$actor['id']);
+            if (isset($u['id'])) {
+                audit((int)$u['id'], 'logout', 'users', (int)$u['id']);
+            }
             unset($_SESSION['uid']);
             session_regenerate_id(true);
             flash('Anda telah keluar dari sistem.');
             redirect('home');
-
-        case 'login':
-            $email = strtolower(required_str('email', 190));
-            $pw    = (string)($_POST['password'] ?? '');
-            $u     = one('SELECT * FROM users WHERE email=?', [$email]);
-            if (!$u || !(int)$u['is_active'] || !password_verify($pw, $u['password_hash'])) {
-                throw new RuntimeException('Email/password salah atau akun dinonaktifkan.');
-            }
-            session_regenerate_id(true);
-            $_SESSION['uid'] = (int)$u['id'];
-            audit((int)$u['id'], 'login', 'user', (int)$u['id']);
-            flash('Selamat datang di CoCoLink.');
-            redirect();
 
         case 'register_supplier':
             $name    = required_str('name');
@@ -142,7 +132,7 @@ function process_action(): void {
 
         case 'add_replacement_coop':
             must_role(['super_admin', 'induk', 'supplier']);
-            $sid   = $u['supplier_id'] ?: post_id('supplier_id');
+            $sid   = ($u['supplier_id'] ?? null) ?: post_id('supplier_id');
             $name  = required_str('name');
             $city  = required_str('city');
             $addr  = required_str('address');
