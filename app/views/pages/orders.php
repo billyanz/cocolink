@@ -8,16 +8,19 @@ function page_orders(array $u): void {
 
     $query = "SELECT o.*, b.company_name, b.city AS buyer_city, 
               (SELECT c.name FROM order_items i JOIN products p ON p.id=i.product_id JOIN cooperatives c ON c.id=p.coop_id WHERE i.order_id=o.id LIMIT 1) AS coop_name, 
-              (SELECT c.id FROM order_items i JOIN products p ON p.id=i.product_id JOIN cooperatives c ON c.id=p.coop_id WHERE i.order_id=o.id LIMIT 1) AS coop_id 
+              (SELECT c.id FROM order_items i JOIN products p ON p.id=i.product_id JOIN cooperatives c ON c.id=p.coop_id WHERE i.order_id=o.id LIMIT 1) AS coop_id,
+              sh.id AS shipment_id, sh.status AS shipment_status, u_drv.name AS driver_name
               FROM orders o 
-              JOIN buyer_profiles b ON b.id=o.buyer_id";
+              JOIN buyer_profiles b ON b.id=o.buyer_id
+              LEFT JOIN shipments sh ON sh.order_id=o.id
+              LEFT JOIN users u_drv ON u_drv.id=sh.driver_id";
 
     if ($isBuyer) {
         $orders = rows($query . " WHERE o.buyer_id=? ORDER BY o.id DESC", [(int)($u['buyer_id'] ?? 0)]);
     } elseif ($isCoop) {
         $orders = rows($query . " WHERE o.id IN (SELECT i2.order_id FROM order_items i2 JOIN products p2 ON p2.id=i2.product_id WHERE p2.coop_id=?) ORDER BY o.id DESC", [(int)($u['coop_id'] ?? 0)]);
     } elseif ($isDriver) {
-        $orders = rows($query . " WHERE o.status IN ('approved','assigned','in_transit','delivered') ORDER BY o.id DESC");
+        $orders = rows($query . " WHERE o.status IN ('approved','assigned','in_transit','delivered') AND (sh.driver_id=? OR sh.driver_id IS NULL) ORDER BY o.id DESC", [(int)$u['id']]);
     } else {
         $orders = rows($query . " ORDER BY o.id DESC");
     }
@@ -89,7 +92,7 @@ function page_orders(array $u): void {
                 <div>
                     <div class="role-badge-crisp mb-3"><i class="bi bi-receipt"></i> B2B TRANSACTION ORDERS</div>
                     <h2 class="banner-title mb-2">Manajemen Pesanan Industri B2B 📑</h2>
-                    <p class="banner-subtitle mb-0">Koperasi Anak menyetujui pesanan Buyer, lalu Driver Logistik mengantarkan barang ke pabrik tujuan.</p>
+                    <p class="banner-subtitle mb-0">Pengesahan alur transaksi pesanan dari Koperasi Anak Sektor ke Industri Pembeli B2B.</p>
                 </div>
             </div>
         </div>
@@ -109,10 +112,10 @@ function page_orders(array $u): void {
                             <th class="ps-4 py-3">Kode Transaksi</th>
                             <th>Pembeli Industri</th>
                             <th>Koperasi Anak Penjual</th>
-                            <th>Tujuan Pengiriman</th>
+                            <th>Tujuan &amp; Armada</th>
                             <th>Total Bayar</th>
                             <th>Status Order</th>
-                            <th class="text-center">Aksi Transaksi</th>
+                            <th class="text-center">Aksi Keputusan &amp; Cetak</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -121,32 +124,49 @@ function page_orders(array $u): void {
                             <td class="ps-4 fw-bold text-dark"><i class="bi bi-hash text-muted"></i><?= e($ord['order_code']) ?></td>
                             <td><strong class="text-dark"><?= e($ord['company_name']) ?></strong></td>
                             <td><span class="badge bg-light text-dark border"><i class="bi bi-shop me-1"></i><?= e($ord['coop_name'] ?? 'Koperasi Sektor') ?></span></td>
-                            <td><?= e($ord['shipping_address']) ?> (<?= e($ord['buyer_city']) ?>)</td>
+                            <td>
+                                <div><?= e($ord['shipping_address']) ?> (<?= e($ord['buyer_city']) ?>)</div>
+                                <small class="text-muted"><i class="bi bi-truck me-1"></i>Driver: <?= e($ord['driver_name'] ?: 'Belum Ditugaskan') ?></small>
+                            </td>
                             <td><strong class="text-success fs-6"><?= money($ord['total']) ?></strong></td>
                             <td><?= badge($ord['status']) ?></td>
                             <td class="text-center">
-                                <?php if ($isCoop && $ord['status'] === 'requested'): ?>
-                                    <div class="d-flex justify-content-center gap-2">
-                                        <?php action_form('approve_order', (int)$ord['id'], 'ACC Pesanan', 'btn-success btn-sm font-semibold', ['status' => 'approved']); ?>
-                                        <?php action_form('approve_order', (int)$ord['id'], 'Tolak Order', 'btn-outline-danger btn-sm font-semibold', ['status' => 'rejected']); ?>
-                                    </div>
-                                <?php endif; ?>
+                                <div class="d-flex justify-content-center align-items-center gap-1.5 flex-wrap">
+                                    <!-- ACC KOPERASI ANAK -->
+                                    <?php if ($isCoop && $ord['status'] === 'requested'): ?>
+                                        <form method="post" class="d-inline">
+                                            <?= csrf_input() ?>
+                                            <input type="hidden" name="action" value="approve_order">
+                                            <input type="hidden" name="id" value="<?= $ord['id'] ?>">
+                                            <input type="hidden" name="status" value="approved">
+                                            <button class="btn btn-success btn-sm fw-bold px-2.5 py-1" style="border-radius:8px;"><i class="bi bi-check-lg me-1"></i> ACC Order</button>
+                                        </form>
+                                        <form method="post" class="d-inline">
+                                            <?= csrf_input() ?>
+                                            <input type="hidden" name="action" value="approve_order">
+                                            <input type="hidden" name="id" value="<?= $ord['id'] ?>">
+                                            <input type="hidden" name="status" value="rejected">
+                                            <button class="btn btn-outline-danger btn-sm fw-bold px-2 py-1" style="border-radius:8px;">Tolak</button>
+                                        </form>
+                                    <?php endif; ?>
 
-                                <?php if ($isDriver && in_array($ord['status'], ['approved', 'assigned'], true)): ?>
-                                    <?php action_form('update_order_delivery', (int)$ord['id'], 'Ambil & Antar Paket', 'btn-primary btn-sm font-semibold', ['status' => 'in_transit']); ?>
-                                <?php elseif ($isDriver && $ord['status'] === 'in_transit'): ?>
-                                    <?php action_form('update_order_delivery', (int)$ord['id'], 'Tandai Sampai Tujuan', 'btn-warning btn-sm font-semibold', ['status' => 'delivered']); ?>
-                                <?php endif; ?>
+                                    <!-- KONFIRMASI PENERIMAAN BUYER -->
+                                    <?php if ($isBuyer && $ord['status'] === 'delivered'): ?>
+                                        <form method="post" class="d-inline">
+                                            <?= csrf_input() ?>
+                                            <input type="hidden" name="action" value="confirm_order_received">
+                                            <input type="hidden" name="id" value="<?= $ord['id'] ?>">
+                                            <button class="btn btn-success btn-sm fw-bold px-2.5 py-1" style="border-radius:8px;"><i class="bi bi-box-seam me-1"></i> Konfirmasi Diterima</button>
+                                        </form>
+                                    <?php endif; ?>
 
-                                <?php if ($isBuyer && $ord['status'] === 'delivered'): ?>
-                                    <?php action_form('confirm_order_received', (int)$ord['id'], 'Konfirmasi Barang Diterima', 'btn-success btn-sm font-semibold'); ?>
-                                <?php endif; ?>
-
-                                <?php if (!in_array($ord['status'], ['requested', 'rejected'], true)): ?>
-                                    <a href="<?= url('invoice', ['id' => $ord['id']]) ?>" class="btn btn-outline-secondary btn-sm fw-bold px-2.5 py-1 ms-1 rounded-3" target="_blank">
-                                        <i class="bi bi-printer me-1"></i> Invoice
-                                    </a>
-                                <?php endif; ?>
+                                    <!-- TOMBOL CETAK INVOICE -->
+                                    <?php if (!in_array($ord['status'], ['requested', 'rejected'], true)): ?>
+                                        <a href="index.php?page=invoice&id=<?= $ord['id'] ?>" class="btn btn-outline-secondary btn-sm fw-bold px-2.5 py-1 rounded-3" target="_blank">
+                                            <i class="bi bi-printer me-1"></i> Invoice
+                                        </a>
+                                    <?php endif; ?>
+                                </div>
                             </td>
                         </tr>
                     <?php endforeach; ?>
@@ -156,7 +176,7 @@ function page_orders(array $u): void {
                     <div class="p-5 text-center">
                         <i class="bi bi-inbox fs-1 text-muted d-block mb-2"></i>
                         <h6 class="fw-bold text-dark mb-1">Belum Ada Pesanan Transaksi Industri</h6>
-                        <p class="text-secondary small mb-0">Pesanan B2B dari Buyer akan dicatat di sini.</p>
+                        <p class="text-secondary small mb-0">Pesanan B2B dari Buyer akan dicatat dan dikelola di sini.</p>
                     </div>
                 <?php endif; ?>
             </div>

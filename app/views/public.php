@@ -10,33 +10,86 @@ function render_public(string $page): void {
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>CoCoLink &bull; Circular Supply Chain Network</title>
+    
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.2/font/bootstrap-icons.min.css">
+    
     <style>
-        body { background: #F6F8F4; font-family: system-ui, -apple-system, sans-serif; color: #2D3748; }
-        .auth-card { background: #FFFFFF; border-radius: 20px; border: none; box-shadow: 0 10px 30px rgba(0,0,0,0.05); }
-        .btn-coco { background: #164B35; color: #FFF; border: none; font-weight: 600; padding: 0.75rem 1.5rem; border-radius: 10px; }
-        .btn-coco:hover { background: #1D5C43; color: #FFF; }
+        body {
+            background-color: #F8FAFC;
+            font-family: 'Plus Jakarta Sans', -apple-system, sans-serif;
+            color: #0F172A;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+        }
+
+        .auth-card {
+            background: #FFFFFF;
+            border-radius: 20px;
+            border: 1px solid #E2E8F0;
+            box-shadow: 0 12px 32px rgba(0, 86, 145, 0.08);
+        }
+
+        .btn-ocean-primary {
+            background-color: #0077B6;
+            color: #FFFFFF;
+            font-weight: 700;
+            padding: 0.8rem 1.5rem;
+            border-radius: 12px;
+            border: none;
+            transition: all 0.25s ease;
+            box-shadow: 0 4px 12px rgba(0, 119, 182, 0.25);
+        }
+
+        .btn-ocean-primary:hover {
+            background-color: #023E8A;
+            color: #FFFFFF;
+            transform: translateY(-1px);
+        }
+
+        .brand-logo-container {
+            width: 70px;
+            height: 70px;
+            background: #FFFFFF;
+            border-radius: 18px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 8px;
+            box-shadow: 0 6px 18px rgba(0, 119, 182, 0.15);
+            border: 1px solid #E2E8F0;
+        }
+
+        .brand-logo-img {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+        }
     </style>
 </head>
 <body>
 
 <div class="container py-5" style="max-width: 950px;">
     <?php if ($flash): ?>
-        <div class="alert alert-<?= e($flash['kind']) ?> alert-dismissible fade show mb-4" style="border-radius:12px;">
+        <div class="alert alert-<?= e($flash['kind']) ?> alert-dismissible fade show mb-4 border-0 shadow-sm" style="border-radius:14px;">
             <i class="bi bi-info-circle-fill me-2"></i><?= e($flash['message']) ?>
             <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
         </div>
     <?php endif; ?>
 
     <?php if ($page === 'login'): ?>
-        <div class="auth-card p-5 mx-auto" style="max-width: 450px;">
+        <div class="auth-card p-4 p-md-5 mx-auto" style="max-width: 460px;">
             <div class="text-center mb-4">
-                <div class="bg-success text-white rounded-circle d-inline-flex align-items-center justify-content-center mb-2" style="width: 50px; height: 50px; background:#164B35 !important;">
-                    <i class="bi bi-recycle fs-3"></i>
+                <div class="brand-logo-container mb-3">
+                    <img src="<?= url('cocolinklogo.png') ?>" alt="CoCoLink Logo" class="brand-logo-img" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
+                    <i class="bi bi-recycle fs-1 text-primary" style="display:none; color:#0077B6 !important;"></i>
                 </div>
-                <h4 class="fw-bold text-dark">Masuk ke CoCoLink</h4>
-                <p class="text-muted small">Platform Manajemen Ekosistem Sirkular Kelapa Jabodetabek</p>
+                <h4 class="fw-bold text-dark mb-1">Masuk ke CoCoLink</h4>
+                <p class="text-muted small mb-0">Platform Manajemen Ekosistem Sirkular Kelapa Jabodetabek</p>
             </div>
 
             <form method="post">
@@ -44,23 +97,29 @@ function render_public(string $page): void {
                 <input type="hidden" name="action" value="login">
                 <?php field('Alamat Email', 'email', 'email', '', 'required', 'nama@perusahaan.com'); ?>
                 <?php field('Kata Sandi', 'password', 'password', '', 'required', '••••••••'); ?>
-                <button class="btn btn-coco w-100 mt-2 mb-3 shadow-sm">Masuk Sistem</button>
+                <button class="btn btn-ocean-primary w-100 mt-3 mb-3">Masuk Sistem</button>
             </form>
 
             <div class="border-top pt-3 text-center small text-muted">
                 Belum punya akun mitra PT Pemasok? <br>
-                <a href="<?= url('register_supplier') ?>" class="text-success fw-bold text-decoration-none">Daftar PT Pemasok Utama</a>
+                <a href="<?= url('register_supplier') ?>" class="fw-bold text-decoration-none" style="color:#0077B6;">Daftar PT Pemasok Utama</a>
             </div>
         </div>
 
     <?php elseif ($page === 'register_supplier'): ?>
-        <div class="auth-card p-5">
-            <div class="d-flex justify-content-between align-items-center mb-4 pb-3 border-bottom">
-                <div>
-                    <h4 class="fw-bold text-dark mb-1">Pendaftaran PT Pemasok Limbah Utama</h4>
-                    <p class="text-muted small mb-0">Ajukan pendaftaran PT Pemasok Regional dan daftarkan minimal 5 Koperasi Anak Sektor Wilayah (Jabodetabek).</p>
+        <div class="auth-card p-4 p-md-5">
+            <div class="d-flex justify-content-between align-items-center mb-4 pb-3 border-bottom flex-wrap gap-2">
+                <div class="d-flex align-items-center gap-3">
+                    <div class="brand-logo-container" style="width: 50px; height: 50px; padding: 4px;">
+                        <img src="<?= url('cocolinklogo.png') ?>" alt="CoCoLink Logo" class="brand-logo-img" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
+                        <i class="bi bi-recycle fs-3 text-primary" style="display:none;"></i>
+                    </div>
+                    <div>
+                        <h4 class="fw-bold text-dark mb-0">Pendaftaran PT Pemasok Limbah Utama</h4>
+                        <p class="text-muted small mb-0">Ajukan pendaftaran PT Pemasok Regional dan daftarkan minimal 5 Koperasi Anak Sektor Wilayah (Jabodetabek).</p>
+                    </div>
                 </div>
-                <a href="<?= url('login') ?>" class="btn btn-outline-secondary btn-sm rounded-pill px-3"><i class="bi bi-arrow-left me-1"></i> Kembali Login</a>
+                <a href="<?= url('login') ?>" class="btn btn-outline-secondary btn-sm rounded-pill px-3 fw-semibold"><i class="bi bi-arrow-left me-1"></i> Kembali Login</a>
             </div>
 
             <form method="post">
@@ -68,7 +127,7 @@ function render_public(string $page): void {
                 <input type="hidden" name="action" value="register_supplier">
 
                 <!-- 01. AKUN PENANGGUNG JAWAB ADMIN PT -->
-                <h6 class="fw-bold text-success mb-3"><i class="bi bi-person-circle me-2"></i>01 &bull; Akun Pengelola / Admin PT Pemasok</h6>
+                <h6 class="fw-bold mb-3" style="color:#0077B6;"><i class="bi bi-person-circle me-2"></i>01 &bull; Akun Pengelola / Admin PT Pemasok</h6>
                 <div class="row g-3 mb-4">
                     <div class="col-md-4"><?php field('Nama Lengkap Manajer', 'name', 'text', '', 'required', 'Rajsfano Priariya'); ?></div>
                     <div class="col-md-4"><?php field('Email Perusahaan', 'email', 'email', '', 'required', 'pt@perusahaan.com'); ?></div>
@@ -76,7 +135,7 @@ function render_public(string $page): void {
                 </div>
 
                 <!-- 02. LEGALITAS PT PEMASOK UTAMA -->
-                <h6 class="fw-bold text-success mb-3"><i class="bi bi-building me-2"></i>02 &bull; Legalitas Perusahaan PT Pemasok Utama</h6>
+                <h6 class="fw-bold mb-3" style="color:#0077B6;"><i class="bi bi-building me-2"></i>02 &bull; Legalitas Perusahaan PT Pemasok Utama</h6>
                 <div class="row g-3 mb-4">
                     <div class="col-md-6"><?php field('Nama Resmi PT', 'legal_name', 'text', '', 'required', 'PT Kelapa Mandiri Abadi'); ?></div>
                     <div class="col-md-6"><?php field('NIB Perusahaan', 'nib', 'text', '', 'required', '998877665544'); ?></div>
@@ -84,20 +143,20 @@ function render_public(string $page): void {
                     <div class="col-md-6"><?php field('Kota / Wilayah Operasi', 'city', 'text', '', 'required', 'Jakarta'); ?></div>
                     <div class="col-12">
                         <label class="form-label fw-semibold text-dark small mb-1">Alamat Kantor / Gudang Utama PT</label>
-                        <textarea class="form-control" name="address" rows="2" required placeholder="Jl. Raya Perkebunan Kelapa No. 102" style="border-radius:10px;"></textarea>
+                        <textarea class="form-control" name="address" rows="2" required placeholder="Jl. Raya Perkebunan Kelapa No. 102" style="border-radius:10px; border-color:#CBD5E1;"></textarea>
                     </div>
 
                     <div class="col-12">
                         <label class="form-label fw-semibold text-dark small mb-1">
                             <i class="bi bi-geo-alt-fill text-danger me-1"></i> Link Google Maps Kantor PT Utama
                         </label>
-                        <input type="url" class="form-control" name="gmaps_url" required placeholder="https://maps.app.goo.gl/..." style="border-radius:10px; padding:0.6rem 0.9rem;">
+                        <input type="url" class="form-control" name="gmaps_url" required placeholder="https://maps.app.goo.gl/..." style="border-radius:10px; padding:0.6rem 0.9rem; border-color:#CBD5E1;">
                     </div>
                 </div>
 
                 <!-- 03. 5 KOPERASI ANAK SEKTOR WILAYAH -->
                 <div class="d-flex justify-content-between align-items-center mb-3">
-                    <h6 class="fw-bold text-success mb-0"><i class="bi bi-shop me-2"></i>03 &bull; Data 5 Koperasi Anak Sektor Wilayah (Jabodetabek)</h6>
+                    <h6 class="fw-bold mb-0" style="color:#0077B6;"><i class="bi bi-shop me-2"></i>03 &bull; Data 5 Koperasi Anak Sektor Wilayah (Jabodetabek)</h6>
                     <span class="badge bg-warning text-dark"><i class="bi bi-exclamation-triangle me-1"></i>Wajib 5 Sektor</span>
                 </div>
 
@@ -120,7 +179,7 @@ function render_public(string $page): void {
                     $sec = $sectors[$i];
                 ?>
                     <div class="p-3 border rounded bg-light mb-3" style="border-radius:12px;">
-                        <div class="fw-bold text-dark small mb-2"><i class="bi bi-pin-map-fill me-1 text-success"></i>Koperasi Sektor Wilayah #<?= $i ?></div>
+                        <div class="fw-bold text-dark small mb-2"><i class="bi bi-pin-map-fill me-1" style="color:#0077B6;"></i>Koperasi Sektor Wilayah #<?= $i ?></div>
                         <div class="row g-2">
                             <div class="col-md-4">
                                 <input type="text" class="form-control form-control-sm" name="coop_name[]" value="<?= e($sec['name']) ?>" required placeholder="Nama Koperasi Sektor">
@@ -146,7 +205,7 @@ function render_public(string $page): void {
                 <?php endfor; ?>
 
                 <div class="text-end mt-4">
-                    <button class="btn btn-coco fw-bold px-5 py-2 shadow-sm" style="border-radius:10px;">
+                    <button class="btn btn-ocean-primary fw-bold px-5 py-2">
                         <i class="bi bi-send-check-fill me-1"></i> Ajukan Pendaftaran PT Pemasok
                     </button>
                 </div>

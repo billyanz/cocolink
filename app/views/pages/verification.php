@@ -1,43 +1,139 @@
 <?php
+/**
+ * Handler POST Actions untuk Modul Verifikasi (verification.php)
+ * Menangani Verifikasi Supplier, Koperasi, Tambah Koperasi Anak, & Hapus Koperasi.
+ */
+function handle_verification_actions(): void {
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST') return;
+
+    $db = get_db_connection(); // Menyesuaikan fungsi koneksi PDO database aplikasi Anda
+    $action = $_POST['action'] ?? '';
+
+    // 1. Verifikasi Status PT Pemasok / Supplier Utama
+    if ($action === 'verify_supplier') {
+        $id     = intval($_POST['id'] ?? 0);
+        $status = $_POST['status'] ?? '';
+        if ($id > 0 && in_array($status, ['verified', 'rejected'], true)) {
+            $stmt = $db->prepare("UPDATE suppliers SET status = ? WHERE id = ?");
+            $stmt->execute([$status, $id]);
+            $_SESSION['flash_success'] = "Status PT Pemasok berhasil diperbarui!";
+        }
+        header("Location: index.php?page=verification");
+        exit;
+    }
+
+    // 2. Verifikasi Status Koperasi Anak Sektor
+    if ($action === 'verify_coop') {
+        $id     = intval($_POST['id'] ?? 0);
+        $status = $_POST['status'] ?? '';
+        if ($id > 0 && in_array($status, ['verified', 'rejected'], true)) {
+            $stmt = $db->prepare("UPDATE cooperatives SET status = ? WHERE id = ?");
+            $stmt->execute([$status, $id]);
+            $_SESSION['flash_success'] = "Status Koperasi Anak berhasil diperbarui!";
+        }
+        header("Location: index.php?page=verification");
+        exit;
+    }
+
+    // 3. Tambah Koperasi Anak Sektor Pengganti & Otomatis Buatkan Akun Login
+    if ($action === 'add_replacement_coop') {
+        $supplier_id = intval($_POST['supplier_id'] ?? 0);
+        $name        = trim($_POST['name'] ?? '');
+        $city        = trim($_POST['city'] ?? '');
+        $address     = trim($_POST['address'] ?? '');
+        $raw_type_id = !empty($_POST['specialty_raw_type_id']) ? intval($_POST['specialty_raw_type_id']) : null;
+        
+        // Email & Password default jika tidak disediakan di form mini
+        $email       = trim($_POST['email'] ?? strtolower(str_replace(' ', '', $name)) . '@cocolink.test');
+        $password    = $_POST['password'] ?? '12345678';
+
+        if (empty($name) || empty($supplier_id) || empty($city)) {
+            $_SESSION['flash_error'] = "Nama Koperasi Sektor dan Kota/Sektor wajib diisi!";
+            header("Location: index.php?page=verification");
+            exit;
+        }
+
+        try {
+            $db->beginTransaction();
+
+            // Insert Koperasi (HANYA KOLOM YANG ADA DI cocolink v1.sql)
+            $stmtCoop = $db->prepare("INSERT INTO cooperatives (supplier_id, name, city, address, specialty_raw_type_id, status) VALUES (?, ?, ?, ?, ?, 'verified')");
+            $stmtCoop->execute([$supplier_id, $name, $city, $address, $raw_type_id]);
+            $coop_id = $db->lastInsertId();
+
+            // Buat Akun Login User Otomatis di tabel users (role: coop)
+            $hashed_password = password_hash($password, PASSWORD_DEFAULT);
+            $stmtUser = $db->prepare("INSERT INTO users (name, email, password, role, supplier_id, coop_id, is_active) VALUES (?, ?, ?, 'coop', ?, ?, 1)");
+            $stmtUser->execute([$name, $email, $hashed_password, $supplier_id, $coop_id]);
+
+            $db->commit();
+            $_SESSION['flash_success'] = "Koperasi Anak Sektor baru dan Akun Login ($email) berhasil dibuat!";
+        } catch (Exception $e) {
+            $db->rollBack();
+            $_SESSION['flash_error'] = "Gagal membuat Koperasi Anak: " . $e->getMessage();
+        }
+
+        header("Location: index.php?page=verification");
+        exit;
+    }
+
+    // 4. Hapus Koperasi Anak
+    if ($action === 'delete_coop') {
+        $id = intval($_POST['id'] ?? 0);
+        if ($id > 0) {
+            $stmt = $db->prepare("DELETE FROM cooperatives WHERE id = ?");
+            $stmt->execute([$id]);
+            $_SESSION['flash_success'] = "Koperasi Anak berhasil dihapus!";
+        }
+        header("Location: index.php?page=verification");
+        exit;
+    }
+}
+
+/**
+ * Halaman Utama Modul Verifikasi
+ */
 function page_verification(): void {
+    // Jalankan Handler POST jika ada pengiriman form
+    handle_verification_actions();
+
     $u       = user();
     $isSuper = $u['role'] === 'super_admin';
     $isInduk = in_array($u['role'], ['induk', 'supplier'], true);
 
     if ($isSuper || $u['role'] === 'induk') {
         $suppliers = rows("SELECT s.*, 
-                          (SELECT email FROM users WHERE supplier_id=s.id LIMIT 1) AS supplier_email,
-                          (SELECT COUNT(*) FROM cooperatives c WHERE c.supplier_id=s.id AND c.status='verified') AS verified_coops,
-                          (SELECT COUNT(*) FROM cooperatives c WHERE c.supplier_id=s.id) AS total_coops
+                          (SELECT email FROM users WHERE supplier_id = s.id AND role IN ('supplier','induk') LIMIT 1) AS supplier_email,
+                          (SELECT COUNT(*) FROM cooperatives c WHERE c.supplier_id = s.id AND c.status = 'verified') AS verified_coops,
+                          (SELECT COUNT(*) FROM cooperatives c WHERE c.supplier_id = s.id) AS total_coops
                           FROM suppliers s 
-                          ORDER BY FIELD(s.status,'pending','rejected','verified'), s.id DESC");
+                          ORDER BY FIELD(s.status, 'pending', 'rejected', 'verified'), s.id DESC");
 
-        $coops = rows("SELECT c.*, s.legal_name, r.name AS raw_name,
-                       (SELECT email FROM users WHERE coop_id=c.id LIMIT 1) AS coop_email
+        $coops = rows("SELECT c.*, s.legal_name, IFNULL(r.name, '-') AS raw_name,
+                       (SELECT email FROM users WHERE coop_id = c.id AND role = 'coop' LIMIT 1) AS coop_email
                        FROM cooperatives c 
-                       JOIN suppliers s ON s.id=c.supplier_id 
-                       JOIN raw_types r ON r.id=c.specialty_raw_type_id 
-                       ORDER BY FIELD(c.status,'pending','rejected','verified'), c.id DESC");
+                       LEFT JOIN suppliers s ON s.id = c.supplier_id 
+                       LEFT JOIN raw_types r ON r.id = c.specialty_raw_type_id 
+                       ORDER BY FIELD(c.status, 'pending', 'rejected', 'verified'), c.id DESC");
     } else {
-        $sid = $u['supplier_id'];
+        $sid = $u['supplier_id'] ?? 0;
         $suppliers = rows("SELECT s.*, 
-                          (SELECT email FROM users WHERE supplier_id=s.id LIMIT 1) AS supplier_email,
-                          (SELECT COUNT(*) FROM cooperatives c WHERE c.supplier_id=s.id AND c.status='verified') AS verified_coops,
-                          (SELECT COUNT(*) FROM cooperatives c WHERE c.supplier_id=s.id) AS total_coops
-                          FROM suppliers s WHERE s.id=?", [$sid]);
+                          (SELECT email FROM users WHERE supplier_id = s.id AND role IN ('supplier','induk') LIMIT 1) AS supplier_email,
+                          (SELECT COUNT(*) FROM cooperatives c WHERE c.supplier_id = s.id AND c.status = 'verified') AS verified_coops,
+                          (SELECT COUNT(*) FROM cooperatives c WHERE c.supplier_id = s.id) AS total_coops
+                          FROM suppliers s WHERE s.id = ?", [$sid]);
 
-        $coops = rows("SELECT c.*, s.legal_name, r.name AS raw_name,
-                       (SELECT email FROM users WHERE coop_id=c.id LIMIT 1) AS coop_email
+        $coops = rows("SELECT c.*, s.legal_name, IFNULL(r.name, '-') AS raw_name,
+                       (SELECT email FROM users WHERE coop_id = c.id AND role = 'coop' LIMIT 1) AS coop_email
                        FROM cooperatives c 
-                       JOIN suppliers s ON s.id=c.supplier_id 
-                       JOIN raw_types r ON r.id=c.specialty_raw_type_id 
-                       WHERE c.supplier_id=?
+                       LEFT JOIN suppliers s ON s.id = c.supplier_id 
+                       LEFT JOIN raw_types r ON r.id = c.specialty_raw_type_id 
+                       WHERE c.supplier_id = ?
                        ORDER BY c.id DESC", [$sid]);
     }
 
     $rawTypes = rows("SELECT id, name FROM raw_types ORDER BY name");
 
-    // Kelompokkan Koperasi Anak berdasarkan supplier_id
     $coopsBySupplier = [];
     foreach ($coops as $c) {
         $coopsBySupplier[$c['supplier_id']][] = $c;
@@ -235,6 +331,23 @@ function page_verification(): void {
 </style>
 
 <div class="verification-container">
+    <!-- ALERT NOTIFIKASI SYSTEM FLASH MESSAGES -->
+    <?php if (!empty($_SESSION['flash_error'])): ?>
+        <div class="alert alert-danger alert-dismissible fade show mb-4" role="alert" style="border-radius:12px;">
+            <i class="bi bi-exclamation-triangle-fill me-2"></i><?= e($_SESSION['flash_error']); ?>
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+        <?php unset($_SESSION['flash_error']); ?>
+    <?php endif; ?>
+
+    <?php if (!empty($_SESSION['flash_success'])): ?>
+        <div class="alert alert-success alert-dismissible fade show mb-4" role="alert" style="border-radius:12px;">
+            <i class="bi bi-check-circle-fill me-2"></i><?= e($_SESSION['flash_success']); ?>
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+        <?php unset($_SESSION['flash_success']); ?>
+    <?php endif; ?>
+
     <!-- BANNER OCEAN THEME WITH SILHOUETTE -->
     <div class="card border-0 mb-4 ocean-banner-card">
         <div class="banner-silhouette-bg">
@@ -263,7 +376,7 @@ function page_verification(): void {
                         <i class="bi bi-shield-check"></i> ACCREDITATION &amp; LEGALITY VERIFICATION
                     </div>
                     <h2 class="banner-title mb-2">Verifikasi Legalitas &amp; Kepatuhan PT Pemasok 🛡️</h2>
-                    <p class="banner-subtitle mb-0">Pengesahan PT Pemasok Utama &amp; 5 Koperasi Anak Sektor Wilayah oleh Koperasi Induk Metropolitan.</p>
+                    <p class="banner-subtitle mb-0">Pengesahan PT Pemasok Utama &amp; Koperasi Anak Sektor Wilayah oleh Koperasi Induk Metropolitan.</p>
                 </div>
             </div>
         </div>
@@ -312,7 +425,7 @@ function page_verification(): void {
                                 <span class="email-chip"><i class="bi bi-envelope-fill"></i><?= e($s['supplier_email'] ?: 'Email Belum Didaftarkan') ?></span>
                             </div>
                             <div class="small text-secondary">
-                                <i class="bi bi-geo-alt-fill me-1 text-primary"></i><?= e($s['city'] . ', ' . $s['province']) ?>
+                                <i class="bi bi-geo-alt-fill me-1 text-primary"></i><?= e($s['city'] . ($s['province'] ? ', ' . $s['province'] : '')) ?>
                             </div>
                         </div>
                     </div>
@@ -363,7 +476,7 @@ function page_verification(): void {
                     </div>
                 </div>
 
-                <!-- ISI PANEL COLLAPSIBLE (DETAIL SECTION & 5 KOPERASI ANAK) -->
+                <!-- ISI PANEL COLLAPSIBLE (DETAIL SECTION & KOPERASI ANAK) -->
                 <div class="supplier-collapse-content" id="collapseContent<?= $s['id'] ?>">
                     <div class="p-4 border-top">
                         
@@ -415,6 +528,7 @@ function page_verification(): void {
                                         </div>
                                         <div class="col-md-3">
                                             <select class="form-select form-select-sm" name="specialty_raw_type_id" required>
+                                                <option value="">-- Pilih Spesialisasi --</option>
                                                 <?php foreach ($rawTypes as $rt): ?>
                                                     <option value="<?= $rt['id'] ?>"><?= e($rt['name']) ?></option>
                                                 <?php endforeach; ?>
@@ -431,7 +545,7 @@ function page_verification(): void {
                             </div>
                         <?php endif; ?>
 
-                        <!-- DAFTAR 5 KOPERASI ANAK SEKTOR WILAYAH BINAAN -->
+                        <!-- DAFTAR KOPERASI ANAK SEKTOR WILAYAH BINAAN -->
                         <h6 class="fw-bold text-dark mb-3 small text-uppercase" style="letter-spacing:0.5px;">
                             <i class="bi bi-shop me-1 text-primary"></i> Daftar Koperasi Anak Sektor Binaan (<?= count($childCoops) ?> / 5)
                         </h6>

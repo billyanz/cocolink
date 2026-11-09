@@ -48,10 +48,25 @@ function page_catalog(array $u): void {
 
     .product-card-item {
         background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 18px;
-        transition: all 0.25s ease; box-shadow: 0 4px 12px rgba(0,0,0,0.02);
+        transition: all 0.25s ease; box-shadow: 0 4px 12px rgba(0,0,0,0.02); overflow: hidden;
     }
     .product-card-item:hover {
         border-color: #0077B6; transform: translateY(-4px); box-shadow: 0 10px 24px -4px rgba(0, 119, 182, 0.15);
+    }
+
+    .product-img-box {
+        width: 100%; height: 180px; background-color: #F8FAFC;
+        position: relative; overflow: hidden; display: flex; align-items: center; justify-content: center;
+        border-bottom: 1px solid #F1F5F9;
+    }
+    .product-img-box img {
+        width: 100%; height: 100%; object-fit: cover; transition: transform 0.3s ease;
+    }
+    .product-card-item:hover .product-img-box img {
+        transform: scale(1.05);
+    }
+    .no-img-placeholder {
+        color: #94A3B8; font-size: 2.5rem; display: flex; flex-direction: column; align-items: center; gap: 4px;
     }
 
     .btn-ocean-primary {
@@ -85,16 +100,50 @@ function page_catalog(array $u): void {
                 <div>
                     <div class="role-badge-crisp mb-3"><i class="bi bi-cart-check"></i> B2B INDUSTRY CATALOG</div>
                     <h2 class="banner-title mb-2">Katalog Olahan Industri B2B 🛍️</h2>
-                    <p class="banner-subtitle mb-0">Pasokan barang olahan berkualitas murni dari 5 Koperasi Anak Sektor Wilayah Jabodetabek.</p>
+                    <p class="banner-subtitle mb-0">Pasokan barang olahan murni hasil produksi Koperasi Anak Sektor Wilayah Jabodetabek.</p>
                 </div>
             </div>
         </div>
     </div>
 
-    <div class="row g-4">
-        <?php foreach ($products as $pr): ?>
-            <div class="col-12 col-md-6 col-lg-4">
+    <!-- FILTER / SEARCH BAR PRODUCT -->
+    <div class="card border-0 shadow-sm p-3 mb-4" style="border-radius:14px; border:1px solid #E2E8F0;">
+        <div class="row g-2 align-items-center">
+            <div class="col-md-9">
+                <div class="input-group">
+                    <span class="input-group-text bg-white border-end-0 text-muted"><i class="bi bi-search"></i></span>
+                    <input type="text" id="catalogSearch" class="form-control border-start-0" placeholder="Cari nama olahan limbah, jenis bahan, atau lokasi Koperasi Anak..." onkeyup="filterCatalog()">
+                </div>
+            </div>
+            <div class="col-md-3 text-end">
+                <span class="badge bg-light text-dark border px-3 py-2 fw-semibold w-100">
+                    <i class="bi bi-box-seam me-1 text-primary"></i> Total Produk: <strong id="catalogCount"><?= count($products) ?></strong>
+                </span>
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-4" id="catalogGrid">
+        <?php foreach ($products as $pr): 
+            $imagePath = !empty($pr['image']) ? 'storage/uploads/' . $pr['image'] : '';
+            $hasImage  = !empty($pr['image']) && file_exists(__DIR__ . '/../../../storage/uploads/' . $pr['image']);
+            $searchTag = strtolower(e($pr['name'] . ' ' . $pr['raw_name'] . ' ' . $pr['coop_name'] . ' ' . $pr['coop_city']));
+        ?>
+            <div class="col-12 col-md-6 col-lg-4 catalog-item-card" data-search="<?= $searchTag ?>">
                 <div class="card border-0 product-card-item h-100">
+                    
+                    <!-- FOTO PRODUK DINAMIS (POIN 8) -->
+                    <div class="product-img-box">
+                        <?php if ($hasImage): ?>
+                            <img src="<?= e($imagePath) ?>" alt="<?= e($pr['name']) ?>" loading="lazy">
+                        <?php else: ?>
+                            <div class="no-img-placeholder">
+                                <i class="bi bi-box2"></i>
+                                <span style="font-size:0.75rem; font-weight:600;">Foto Sampel Sektor</span>
+                            </div>
+                        <?php endif; ?>
+                    </div>
+
                     <div class="card-body p-4 d-flex flex-column">
                         <div class="d-flex justify-content-between align-items-start mb-2">
                             <span class="badge bg-primary bg-opacity-10 text-primary border border-primary px-2.5 py-1 rounded-pill"><?= e($pr['raw_name']) ?></span>
@@ -154,4 +203,23 @@ function page_catalog(array $u): void {
         <?php endif; ?>
     </div>
 </div>
+
+<script>
+function filterCatalog() {
+    const input = document.getElementById('catalogSearch').value.toLowerCase().trim();
+    const items = document.querySelectorAll('.catalog-item-card');
+    let visible = 0;
+
+    items.forEach(item => {
+        const searchData = item.getAttribute('data-search');
+        if (searchData.includes(input)) {
+            item.style.display = "";
+            visible++;
+        } else {
+            item.style.display = "none";
+        }
+    });
+    document.getElementById('catalogCount').innerText = visible;
+}
+</script>
 <?php } ?>
