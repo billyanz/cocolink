@@ -162,7 +162,7 @@ function page_orders(array $u): void {
 
                                     <!-- TOMBOL CETAK INVOICE -->
                                     <?php if (!in_array($ord['status'], ['requested', 'rejected'], true)): ?>
-                                        <a href="index.php?page=invoice&id=<?= $ord['id'] ?>" class="btn btn-outline-secondary btn-sm fw-bold px-2.5 py-1 rounded-3" target="_blank">
+                                        <a href="report.php?type=invoice&id=<?= $ord['id'] ?>" class="btn btn-outline-secondary btn-sm fw-bold px-2.5 py-1 rounded-3" target="_blank">
                                             <i class="bi bi-printer me-1"></i> Invoice
                                         </a>
                                     <?php endif; ?>

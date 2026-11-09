@@ -12,12 +12,7 @@
 3. Buka `http://localhost/phpmyadmin`. Masuk tab **Import**, pilih `CocoLink/database/cocolink.sql`, klik **Import**. File ini membuat database `cocolink` dan seluruh tabelnya. **Perhatian: SQL memakai DROP TABLE untuk database cocolink; jangan impor ulang pada database yang berisi data penting.**
 4. Buka `config/config.php`. Default XAMPP: host `127.0.0.1`, user `root`, password kosong. Ubah jika MySQL berbeda.
 5. Aktifkan ekstensi `pdo_mysql` dan `fileinfo` pada `php.ini` XAMPP. `mbstring` dan `iconv` disarankan. PDF/XLSX dibangun memakai PHP native; ekstensi `zip` tidak diperlukan. Restart Apache setelah mengubah `php.ini`.
-6. Buat akun awal + data simulasi dengan terminal:
-   ```bat
-   cd C:\xampp\htdocs\CocoLink
-   C:\xampp\php\php.exe tools\seed_demo.php
-   ```
-   Jalankan **sekali** pada database kosong. Script akan menolak memasukkan data demo apabila sudah ada pengguna.
+6. File `database/cocolink.sql` sudah berisi akun dan data demo. Jangan jalankan seeder setelah mengimpor dump tersebut.
 7. Buka aplikasi melalui `http://localhost/CocoLink/`.
 
 > Jika nama folder bukan `CocoLink`, URL harus menyesuaikan. Semua link internal mendeteksi path secara otomatis.
@@ -27,11 +22,11 @@
 | Role | Email | Password |
 |---|---|---|
 | Super Admin Platform | `admin@cocolink.test` | `CocoLink!2026` |
-| Admin Koperasi Induk | `induk@cocolink.test` | `CocoLink!2026` |
-| PT pemasok | `pt@cocolink.test` | `CocoLink!2026` |
-| Koperasi anak | `anak@cocolink.test` | `CocoLink!2026` |
-| Pembeli industri | `buyer@cocolink.test` | `CocoLink!2026` |
-| Driver logistik | `driver@cocolink.test` | `CocoLink!2026` |
+| Admin Koperasi Induk | `induk.jabodetabek@cocolink.test` | `123456` |
+| PT pemasok | `pt.rajs@cocolink.test` | `123456` |
+| Koperasi anak | `coop.bogor@cocolink.test` | `123456` |
+| Pembeli industri | `buyer.briket@cocolink.test` | `123456` |
+| Driver logistik | `driver.budi@cocolink.test` | `123456` |
 
 **Hapus akun dan data demo sebelum digunakan untuk operasi nyata.** Jangan memakai password ini di server publik.
 

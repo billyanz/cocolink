@@ -347,12 +347,12 @@ CREATE TABLE `users` (
 --
 
 INSERT INTO `users` (`id`, `name`, `email`, `password`, `role`, `driver_type`, `supplier_id`, `coop_id`, `buyer_id`, `is_active`, `created_at`) VALUES
-(1, 'Super Admin Master', 'admin@cocolink.test', '$2y$10$e0MYzXyjpJS7Pd0RVvHwHe1zFhN0hL4a2J1mG.wE6N2P6G7K1zHCS', 'super_admin', 'coop_to_buyer', NULL, NULL, NULL, 1, '2026-11-03 14:44:13'),
-(2, 'Pengelola Koperasi Induk Metropolitan', 'induk.jabodetabek@cocolink.test', '$2y$10$e0MYzXyjpJS7Pd0RVvHwHe1zFhN0hL4a2J1mG.wE6N2P6G7K1zHCS', 'induk', 'coop_to_buyer', 1, NULL, NULL, 1, '2026-11-03 14:44:13'),
-(3, 'Direktur PT Rajs Hydro', 'pt.rajs@cocolink.test', '$2y$10$e0MYzXyjpJS7Pd0RVvHwHe1zFhN0hL4a2J1mG.wE6N2P6G7K1zHCS', 'supplier', 'coop_to_buyer', 2, NULL, NULL, 1, '2026-11-03 14:44:13'),
-(4, 'Admin Kop. Anak Bogor', 'coop.bogor@cocolink.test', '$2y$10$e0MYzXyjpJS7Pd0RVvHwHe1zFhN0hL4a2J1mG.wE6N2P6G7K1zHCS', 'coop', 'coop_to_buyer', 1, 1, NULL, 1, '2026-11-03 14:44:13'),
-(5, 'Procurement Manager PT Eco Briket', 'buyer.briket@cocolink.test', '$2y$10$e0MYzXyjpJS7Pd0RVvHwHe1zFhN0hL4a2J1mG.wE6N2P6G7K1zHCS', 'buyer', 'coop_to_buyer', NULL, NULL, 1, 1, '2026-11-03 14:44:13'),
-(6, 'Driver Express Logistik', 'driver.budi@cocolink.test', '$2y$10$e0MYzXyjpJS7Pd0RVvHwHe1zFhN0hL4a2J1mG.wE6N2P6G7K1zHCS', 'driver', 'coop_to_buyer', 1, 1, NULL, 1, '2026-11-03 14:44:13'),
+(1, 'Super Admin Master', 'admin@cocolink.test', '$2y$12$wimFCHVBi4LzyekJ/jOuP.LNn6ISsDe/QWd7syrjyNAeGvGUHzZEC', 'super_admin', 'coop_to_buyer', NULL, NULL, NULL, 1, '2026-11-03 14:44:13'),
+(2, 'Pengelola Koperasi Induk Metropolitan', 'induk.jabodetabek@cocolink.test', '$2y$12$WuGHhkHAn5lDKNRyILMHiOEfu/MoFLpBrHHT8gVd5DV2h4dMCY.yG', 'induk', 'coop_to_buyer', 1, NULL, NULL, 1, '2026-11-03 14:44:13'),
+(3, 'Direktur PT Rajs Hydro', 'pt.rajs@cocolink.test', '$2y$12$PMBw36dUd/PbnHJkh/d9Q.l06v.J6OZSX44EgWZNNjLnmmLmHD0Py', 'supplier', 'coop_to_buyer', 2, NULL, NULL, 1, '2026-11-03 14:44:13'),
+(4, 'Admin Kop. Anak Bogor', 'coop.bogor@cocolink.test', '$2y$12$HRpzWxQ8n/odC4Bvg5tN.OcNQlkMC8rG2hsqVU8MRNrtDt0ewAn/S', 'coop', 'coop_to_buyer', 1, 1, NULL, 1, '2026-11-03 14:44:13'),
+(5, 'Procurement Manager PT Eco Briket', 'buyer.briket@cocolink.test', '$2y$12$eNXPF5dHigxP8XLRJDDYj.viU/UJHe3JB0MS/fCxKEgWbbzks.WZm', 'buyer', 'coop_to_buyer', NULL, NULL, 1, 1, '2026-11-03 14:44:13'),
+(6, 'Driver Express Logistik', 'driver.budi@cocolink.test', '$2y$12$uOmPD2c0Zg3aumelwIMUqeD1bZeC7o6l3oldX5I6I48xmnF3cdQQS', 'driver', 'coop_to_buyer', 1, 1, NULL, 1, '2026-11-03 14:44:13'),
 (7, 'tes1', 'test1@gmail.com', '$2y$10$o8VLxdKMGHvBJTX0191XLeOAQGzIgG8CXhNiXqkTOUjHmG7Yp3egy', 'coop', 'coop_to_buyer', NULL, 6, NULL, 1, '2026-11-06 17:10:41');
 
 --

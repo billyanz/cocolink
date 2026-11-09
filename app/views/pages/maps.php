@@ -329,9 +329,16 @@ document.addEventListener('DOMContentLoaded', function() {
         maxZoom: 19, attribution: '&copy; OpenStreetMap CoCoLink Logistics'
     }).addTo(map);
 
-    var points = <?= json_encode($points) ?>;
-    var trucks = <?= json_encode($trucks) ?>;
+    var points = <?= json_encode($points, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP | JSON_THROW_ON_ERROR) ?>;
+    var trucks = <?= json_encode($trucks, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP | JSON_THROW_ON_ERROR) ?>;
     var bounds = [];
+
+    function popupElement(tagName, className, text) {
+        var element = document.createElement(tagName);
+        element.className = className;
+        element.textContent = String(text == null ? '' : text);
+        return element;
+    }
 
     // RENDER MARKER TITIK ENTITAS
     points.forEach(function(pt) {
@@ -351,17 +358,36 @@ document.addEventListener('DOMContentLoaded', function() {
             iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41]
         });
 
-        var badgeStyle = 'background-color:' + pt.hex + ' !important; color:#FFFFFF; font-weight:700; border-radius:12px; padding:4px 10px; font-size:0.75rem;';
-        var iconHeader = '<span class="badge mb-2 d-inline-block" style="' + badgeStyle + '">' + pt.role_label + '</span>';
+        var popup = document.createElement('div');
+        popup.style.minWidth = '230px';
+        popup.style.fontFamily = "'Plus Jakarta Sans', sans-serif";
 
-        var pop = '<div style="min-width:230px; font-family:\'Plus Jakarta Sans\', sans-serif;">' +
-                  iconHeader +
-                  '<strong class="text-dark d-block fs-6 mb-1" style="font-weight:800;">' + pt.name + '</strong>' +
-                  '<small class="text-secondary d-block mb-2"><i class="bi bi-geo-alt-fill me-1" style="color:#0077B6;"></i>' + pt.city + '</small>' +
-                  '<div class="p-2.5 rounded bg-light border text-dark small mb-0" style="font-size:0.8rem; line-height:1.4;">' + pt.info + '</div>' +
-                  '</div>';
+        var badge = popupElement('span', 'badge mb-2 d-inline-block', pt.role_label);
+        badge.style.backgroundColor = pt.hex;
+        badge.style.color = '#FFFFFF';
+        badge.style.fontWeight = '700';
+        badge.style.borderRadius = '12px';
+        badge.style.padding = '4px 10px';
+        badge.style.fontSize = '0.75rem';
+        popup.appendChild(badge);
 
-        L.marker([pt.lat, pt.lng], {icon: customIcon, zIndexOffset: zIndexOffset}).addTo(map).bindPopup(pop);
+        var name = popupElement('strong', 'text-dark d-block fs-6 mb-1', pt.name);
+        name.style.fontWeight = '800';
+        popup.appendChild(name);
+
+        var city = popupElement('small', 'text-secondary d-block mb-2', '');
+        var locationIcon = popupElement('i', 'bi bi-geo-alt-fill me-1', '');
+        locationIcon.style.color = '#0077B6';
+        city.appendChild(locationIcon);
+        city.appendChild(document.createTextNode(String(pt.city == null ? '' : pt.city)));
+        popup.appendChild(city);
+
+        var info = popupElement('div', 'p-2 rounded bg-light border text-dark small mb-0', pt.info);
+        info.style.fontSize = '0.8rem';
+        info.style.lineHeight = '1.4';
+        popup.appendChild(info);
+
+        L.marker([pt.lat, pt.lng], {icon: customIcon, zIndexOffset: zIndexOffset}).addTo(map).bindPopup(popup);
         bounds.push([pt.lat, pt.lng]);
     });
 
@@ -373,16 +399,32 @@ document.addEventListener('DOMContentLoaded', function() {
             iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41]
         });
 
-        var popTruck = '<div style="min-width:240px; font-family:\'Plus Jakarta Sans\', sans-serif;">' +
-                       '<span class="badge bg-danger text-white mb-2" style="font-weight:700; border-radius:12px; padding:4px 10px;">🚚 TRUK ARMADA IN-TRANSIT</span>' +
-                       '<strong class="text-dark d-block fs-6 mb-1">' + tr.driver_name + '</strong>' +
-                       '<small class="text-muted d-block mb-1">Order Code: <b>' + tr.order_code + '</b></small>' +
-                       '<small class="text-muted d-block mb-2">Rute: ' + tr.coop_name + ' ➔ ' + tr.buyer_name + '</small>' +
-                       '<div class="p-2 rounded bg-light border text-dark small mb-0" style="font-size:0.78rem;">' +
-                       '<strong>Posisi:</strong> ' + tr.last_note + '<br><strong>Status:</strong> ' + tr.status +
-                       '</div></div>';
+        var popup = document.createElement('div');
+        popup.style.minWidth = '240px';
+        popup.style.fontFamily = "'Plus Jakarta Sans', sans-serif";
 
-        L.marker([tr.lat, tr.lng], {icon: redIcon, zIndexOffset: 2000}).addTo(map).bindPopup(popTruck);
+        var badge = popupElement('span', 'badge bg-danger text-white mb-2', '🚚 TRUK ARMADA IN-TRANSIT');
+        badge.style.fontWeight = '700';
+        badge.style.borderRadius = '12px';
+        badge.style.padding = '4px 10px';
+        popup.appendChild(badge);
+        popup.appendChild(popupElement('strong', 'text-dark d-block fs-6 mb-1', tr.driver_name));
+
+        var order = popupElement('small', 'text-muted d-block mb-1', 'Order Code: ');
+        order.appendChild(popupElement('b', '', tr.order_code));
+        popup.appendChild(order);
+        popup.appendChild(popupElement('small', 'text-muted d-block mb-2', 'Rute: ' + String(tr.coop_name == null ? '' : tr.coop_name) + ' ➔ ' + String(tr.buyer_name == null ? '' : tr.buyer_name)));
+
+        var details = popupElement('div', 'p-2 rounded bg-light border text-dark small mb-0', '');
+        details.style.fontSize = '0.78rem';
+        details.appendChild(popupElement('strong', '', 'Posisi:'));
+        details.appendChild(document.createTextNode(' ' + String(tr.last_note == null ? '' : tr.last_note)));
+        details.appendChild(document.createElement('br'));
+        details.appendChild(popupElement('strong', '', 'Status:'));
+        details.appendChild(document.createTextNode(' ' + String(tr.status == null ? '' : tr.status)));
+        popup.appendChild(details);
+
+        L.marker([tr.lat, tr.lng], {icon: redIcon, zIndexOffset: 2000}).addTo(map).bindPopup(popup);
         bounds.push([tr.lat, tr.lng]);
     });
 

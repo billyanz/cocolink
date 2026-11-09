@@ -20,8 +20,13 @@ try {
             throw new RuntimeException('ID invoice tidak valid.');
         }
 
-        $o = one('SELECT o.*, b.company_name, b.address AS buyer_address FROM orders o JOIN buyer_profiles b ON b.id=o.buyer_id WHERE o.id=?', [$id]);
-        if (!$o || (!is_manager($u) && !($u['role'] === 'buyer' && (int)$u['buyer_id'] === (int)$o['buyer_id']))) {
+        $o = one('SELECT o.*, b.company_name, b.address AS buyer_address, b.city AS buyer_city FROM orders o JOIN buyer_profiles b ON b.id=o.buyer_id WHERE o.id=?', [$id]);
+        $isAdmin = in_array($u['role'], ['super_admin', 'induk'], true);
+        $isOwningBuyer = $u['role'] === 'buyer'
+            && (int)($u['buyer_id'] ?? 0) > 0
+            && (int)$u['buyer_id'] === (int)($o['buyer_id'] ?? 0);
+        if (!$o || (!$isAdmin && !$isOwningBuyer)) {
+            $httpStatus = 403;
             throw new RuntimeException('Invoice ini tidak dapat Anda akses.');
         }
 
@@ -43,7 +48,7 @@ try {
         $pdf->text(40, 735, 'No. Referensi: ' . $label, 11, true, [0.2, 0.2, 0.2]);
         $pdf->text(40, 715, 'Tanggal Transaksi: ' . substr($o['created_at'], 0, 10));
         $pdf->text(40, 694, 'Pembeli Industri: ' . $o['company_name'], 11, true);
-        $pdf->text(40, 678, 'Kota Tujuan: ' . $o['city']);
+        $pdf->text(40, 678, 'Kota Tujuan: ' . $o['buyer_city']);
         $pdf->text(40, 662, 'Alamat Pengiriman: ' . uni_slice($o['shipping_address'], 0, 75));
 
         // Header Tabel Produk Invoice
@@ -73,7 +78,10 @@ try {
     }
 
     // Hanya Admin Induk / Super Admin yang dapat mengakses laporan rekapitulasi
-    must_role(['super_admin', 'induk']);
+    if (!in_array($u['role'], ['super_admin', 'induk'], true)) {
+        $httpStatus = 403;
+        throw new RuntimeException('Anda tidak memiliki izin untuk mengekspor laporan.');
+    }
 
     // 2. Laporan Rekap Pesanan Industri
     if ($type === 'orders') {
@@ -152,7 +160,7 @@ try {
     throw new RuntimeException('Jenis laporan tidak dikenali.');
 
 } catch (Throwable $ex) {
-    http_response_code(400);
+    http_response_code($httpStatus ?? 400);
     header('Content-Type: text/plain; charset=UTF-8');
     echo 'Gagal mengunduh laporan: ' . $ex->getMessage();
 }

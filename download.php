@@ -7,6 +7,7 @@ require __DIR__ . '/app/lib/exports.php';
 try {
     $u = current_user();
     if (!$u) {
+        $httpStatus = 403;
         throw new RuntimeException('Akses ditolak. Silakan login terlebih dahulu.');
     }
 
@@ -23,7 +24,8 @@ try {
             throw new RuntimeException('Berkas bukti pengiriman tidak ditemukan.');
         }
 
-        if (!is_manager($u) && !($u['role'] === 'driver' && (int)$u['id'] === (int)$ev['driver_id']) && !($u['role'] === 'buyer' && (int)$u['buyer_id'] === (int)$ev['buyer_id'])) {
+        if (!in_array($u['role'], ['super_admin', 'induk'], true) && !($u['role'] === 'driver' && (int)$u['id'] === (int)$ev['driver_id']) && !($u['role'] === 'buyer' && (int)($u['buyer_id'] ?? 0) > 0 && (int)$u['buyer_id'] === (int)$ev['buyer_id'])) {
+            $httpStatus = 403;
             throw new RuntimeException('Anda tidak memiliki izin untuk melihat bukti pengiriman ini.');
         }
 
@@ -43,7 +45,24 @@ try {
     }
 
     // 2. GENERATOR EKSPOR LAPORAN MULTI-FORMAT (PDF & XLSX)
-    $type   = required_str('type');
+    if (!in_array($u['role'], ['super_admin', 'induk'], true)) {
+        $httpStatus = 403;
+        throw new RuntimeException('Anda tidak memiliki izin untuk mengekspor laporan.');
+    }
+
+    $scopeId = null;
+    if ($u['role'] === 'supplier') {
+        $scopeId = (int)($u['supplier_id'] ?? 0);
+        if ($scopeId <= 0) {
+            $httpStatus = 403;
+            throw new RuntimeException('Akun pemasok tidak memiliki cakupan data yang valid.');
+        }
+    }
+
+    $type   = trim((string)($_GET['type'] ?? $_POST['type'] ?? ''));
+    if ($type === '' || strlen($type) > 32) {
+        throw new RuntimeException('Kategori laporan tidak valid.');
+    }
     $format = strtolower((string)($_GET['format'] ?? 'pdf'));
 
     if (!in_array($format, ['pdf', 'xlsx'], true)) {
@@ -58,10 +77,27 @@ try {
         case 'orders':
             $title   = 'Laporan Rekapitulasi Transaksi Pesanan B2B';
             $headers = ['Kode Order', 'Pembeli Industri', 'Kota Tujuan', 'Total Bayar', 'Status Order', 'Tanggal'];
-            $rows    = rows("SELECT o.order_code, b.company_name, b.city, o.total, o.status, o.created_at 
+            $query   = "SELECT o.order_code, b.company_name, b.city, o.total, o.status, o.created_at
                              FROM orders o 
                              JOIN buyer_profiles b ON b.id=o.buyer_id 
-                             ORDER BY o.id DESC");
+                             WHERE 1=1";
+            $params = [];
+            if ($u['role'] === 'supplier') {
+                $query .= " AND EXISTS (
+                    SELECT 1 FROM order_items i
+                    JOIN products p ON p.id=i.product_id
+                    JOIN cooperatives c ON c.id=p.coop_id
+                    WHERE i.order_id=o.id AND c.supplier_id=?
+                ) AND NOT EXISTS (
+                    SELECT 1 FROM order_items i
+                    LEFT JOIN products p ON p.id=i.product_id
+                    LEFT JOIN cooperatives c ON c.id=p.coop_id
+                    WHERE i.order_id=o.id AND (p.id IS NULL OR c.id IS NULL OR c.supplier_id<>?)
+                )";
+                $params[] = $scopeId;
+                $params[] = $scopeId;
+            }
+            $rows = rows($query . " ORDER BY o.id DESC", $params);
             foreach ($rows as $r) {
                 $data[] = [
                     $r['order_code'],
@@ -77,11 +113,17 @@ try {
         case 'batches':
             $title   = 'Laporan Rekapitulasi Pasokan Limbah Mentah';
             $headers = ['Kode Batch', 'PT Supplier', 'Jenis Limbah', 'Kuantitas (kg)', 'Catatan', 'Tanggal'];
-            $rows    = rows("SELECT rb.batch_code, s.legal_name, rt.name AS raw_name, rb.quantity, rb.notes, rb.created_at 
+            $query   = "SELECT rb.batch_code, s.legal_name, rt.name AS raw_name, rb.quantity, rb.notes, rb.created_at
                              FROM raw_batches rb 
                              JOIN suppliers s ON s.id=rb.supplier_id 
-                             JOIN raw_types rt ON rt.id=rb.raw_type_id 
-                             ORDER BY rb.id DESC");
+                             JOIN raw_types rt ON rt.id=rb.raw_type_id
+                             WHERE 1=1";
+            $params = [];
+            if ($u['role'] === 'supplier') {
+                $query .= " AND rb.supplier_id=?";
+                $params[] = $scopeId;
+            }
+            $rows = rows($query . " ORDER BY rb.id DESC", $params);
             foreach ($rows as $r) {
                 $data[] = [
                     $r['batch_code'],
@@ -97,11 +139,17 @@ try {
         case 'products':
             $title   = 'Laporan Inventaris Produk Olahan Koperasi';
             $headers = ['SKU Produk', 'Nama Produk', 'Jenis Limbah', 'Koperasi Pengolah', 'Harga (Rp/kg)', 'Stok (kg)'];
-            $rows    = rows("SELECT p.sku, p.name, rt.name AS raw_name, c.name AS coop_name, p.price, p.stock 
+            $query   = "SELECT p.sku, p.name, rt.name AS raw_name, c.name AS coop_name, p.price, p.stock
                              FROM products p 
                              JOIN raw_types rt ON rt.id=p.raw_type_id 
-                             JOIN cooperatives c ON c.id=p.coop_id 
-                             ORDER BY p.id DESC");
+                             JOIN cooperatives c ON c.id=p.coop_id
+                             WHERE 1=1";
+            $params = [];
+            if ($u['role'] === 'supplier') {
+                $query .= " AND c.supplier_id=?";
+                $params[] = $scopeId;
+            }
+            $rows = rows($query . " ORDER BY p.id DESC", $params);
             foreach ($rows as $r) {
                 $data[] = [
                     $r['sku'],
@@ -117,12 +165,29 @@ try {
         case 'shipments':
             $title   = 'Laporan Rekapitulasi Pengiriman & Logistik';
             $headers = ['No Resi', 'Kode Order', 'Driver Petugas', 'Kategori Rute', 'Status Pengiriman', 'Tujuan'];
-            $rows    = rows("SELECT sh.id, o.order_code, u.name AS driver_name, u.driver_type, sh.status, b.company_name 
+            $query   = "SELECT sh.id, o.order_code, u.name AS driver_name, u.driver_type, sh.status, b.company_name
                              FROM shipments sh 
                              JOIN orders o ON o.id=sh.order_id 
                              JOIN buyer_profiles b ON b.id=o.buyer_id 
-                             LEFT JOIN users u ON u.id=sh.driver_id 
-                             ORDER BY sh.id DESC");
+                             LEFT JOIN users u ON u.id=sh.driver_id
+                             WHERE 1=1";
+            $params = [];
+            if ($u['role'] === 'supplier') {
+                $query .= " AND EXISTS (
+                    SELECT 1 FROM order_items i
+                    JOIN products p ON p.id=i.product_id
+                    JOIN cooperatives c ON c.id=p.coop_id
+                    WHERE i.order_id=o.id AND c.supplier_id=?
+                ) AND NOT EXISTS (
+                    SELECT 1 FROM order_items i
+                    LEFT JOIN products p ON p.id=i.product_id
+                    LEFT JOIN cooperatives c ON c.id=p.coop_id
+                    WHERE i.order_id=o.id AND (p.id IS NULL OR c.id IS NULL OR c.supplier_id<>?)
+                )";
+                $params[] = $scopeId;
+                $params[] = $scopeId;
+            }
+            $rows = rows($query . " ORDER BY sh.id DESC", $params);
             foreach ($rows as $r) {
                 $data[] = [
                     'RESI #' . $r['id'],
@@ -148,7 +213,7 @@ try {
     }
 
 } catch (Throwable $e) {
-    http_response_code(400);
+    http_response_code($httpStatus ?? 400);
     echo '<div style="font-family:sans-serif; padding:2rem; color:#991B1B; background:#FEF2F2; border:1px solid #FCA5A5; border-radius:10px; max-width:600px; margin:3rem auto;">';
     echo '<h3 style="margin-top:0;">Gagal Mengunduh Laporan</h3>';
     echo '<p>' . e($e->getMessage()) . '</p>';
