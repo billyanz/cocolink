@@ -1,8 +1,7 @@
 <?php
 declare(strict_types=1);
 
-function render_invoice(): void {
-    $u = user();
+function page_invoice(array $u): void {
     $id = filter_var($_GET['id'] ?? null, FILTER_VALIDATE_INT);
 
     if (!$id) {
@@ -106,7 +105,7 @@ function render_invoice(): void {
             <i class="bi bi-arrow-left me-1"></i> Kembali ke Aplikasi
         </a>
         <button onclick="window.print()" class="btn btn-primary fw-bold px-4 py-2" style="border-radius:10px; background-color:#0077B6; border:none;">
-            <i class="bi bi-printer-fill me-1"></i> Cetak / Simpan PDF (Window Print)
+            <i class="bi bi-printer-fill me-1"></i> Cetak / Simpan PDF
         </button>
     </div>
 
@@ -164,16 +163,16 @@ function render_invoice(): void {
                             <small class="text-muted">SKU: <?= e($it['sku']) ?></small>
                         </td>
                         <td><span class="badge bg-primary bg-opacity-10 text-primary border border-primary"><?= e($it['raw_name']) ?></span></td>
-                        <td class="text-end"><?= money($it['unit_price']) ?></td>
-                        <td class="text-center fw-bold"><?= number($it['quantity']) ?> kg</td>
-                        <td class="text-end pe-3 fw-bold text-dark"><?= money($it['quantity'] * $it['unit_price']) ?></td>
+                        <td class="text-end"><?= money((float)$it['unit_price']) ?></td>
+                        <td class="text-center fw-bold"><?= number((float)$it['quantity']) ?> kg</td>
+                        <td class="text-end pe-3 fw-bold text-dark"><?= money((float)$it['quantity'] * (float)$it['unit_price']) ?></td>
                     </tr>
                 <?php endforeach; ?>
                 </tbody>
                 <tfoot>
                     <tr>
                         <td colspan="5" class="text-end fw-bold fs-6 py-3">GRAND TOTAL TRANSAKSI:</td>
-                        <td class="text-end pe-3 fw-bold fs-5 text-success py-3"><?= money($order['total']) ?></td>
+                        <td class="text-end pe-3 fw-bold fs-5 text-success py-3"><?= money((float)$order['total']) ?></td>
                     </tr>
                 </tfoot>
             </table>
@@ -190,7 +189,7 @@ function render_invoice(): void {
                     </div>
                     <div class="small text-muted">
                         <strong class="text-dark d-block">Verifikasi Digital Sistem CoCoLink</strong>
-                        Dokumen transaksi ini sah dan dikeluarkan secara elektronik oleh sistem terintegrasi Terverifikasi.
+                        Dokumen transaksi ini sah dan dikeluarkan secara elektronik oleh sistem terintegrasi.
                         <div class="mt-1">Status: <strong class="text-success"><?= e(strtoupper(status_text($order['status']))) ?></strong></div>
                     </div>
                 </div>
@@ -209,10 +208,4 @@ function render_invoice(): void {
 </body>
 </html>
 <?php
-}
-
-try {
-    render_invoice();
-} catch (Throwable $e) {
-    echo '<div class="alert alert-danger m-5">' . e($e->getMessage()) . '</div>';
 }

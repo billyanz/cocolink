@@ -14,9 +14,9 @@ final class CocoPdf {
             $this->pages[] = $this->commands;
         }
         $this->commands = [];
-        // Header Banner (Eco-Industrial Primary Color: #164B35)
-        $this->rect(0, 811, 595, 31, [0.086, 0.294, 0.208]);
-        $this->text(40, 822, 'CocoLink  /  Circular Supply Chain Network', 11, true, [1.0, 1.0, 1.0]);
+        // Header Banner (Primary Ocean Theme: #0A2540)
+        $this->rect(0, 811, 595, 31, [0.039, 0.145, 0.251]);
+        $this->text(40, 822, 'CoCoLink  /  Jaringan Supply Chain Sirkular Kelapa Jabodetabek', 11, true, [1.0, 1.0, 1.0]);
         // Footer Line
         $this->line(40, 48, 555, 48, [0.70, 0.77, 0.72]);
     }
@@ -28,7 +28,7 @@ final class CocoPdf {
         return str_replace(['\\', '(', ')'], ['\\\\', '\\(', '\\)'], $clean ?? '');
     }
 
-    public function text(float $x, float $y, string $s, float $size = 10, bool $bold = false, array $rgb = [0.14, 0.21, 0.18]): void {
+    public function text(float $x, float $y, string $s, float $size = 10, bool $bold = false, array $rgb = [0.06, 0.09, 0.16]): void {
         $this->commands[] = sprintf(
             '%.3f %.3f %.3f rg BT /%s %.1f Tf %.1f %.1f Td (%s) Tj ET',
             $rgb[0], $rgb[1], $rgb[2],
@@ -125,15 +125,15 @@ function export_pdf_table(string $title, array $headers, array $data, string $fi
     $start = function () use ($pdf, $title, $headers, &$pageNo, $colCount, $colWidth): float {
         $pdf->newPage();
         $pageNo++;
-        $pdf->text(40, 770, $title, 16, true, [0.086, 0.294, 0.208]);
+        $pdf->text(40, 770, $title, 16, true, [0.039, 0.145, 0.251]);
         $pdf->text(40, 747, 'Laporan Resmi Operasional  |  ' . date('d/m/Y H:i'), 9, false, [0.4, 0.45, 0.42]);
         
         // Header Table Background
-        $pdf->rect(40, 707, 515, 25, [0.863, 0.929, 0.851]);
+        $pdf->rect(40, 707, 515, 25, [0.93, 0.95, 0.98]);
         
         foreach ($headers as $i => $h) {
             $hdrText = function_exists('mb_substr') ? mb_substr((string)$h, 0, 18) : substr((string)$h, 0, 18);
-            $pdf->text(44 + ($i * $colWidth), 716, $hdrText, 8, true, [0.086, 0.294, 0.208]);
+            $pdf->text(44 + ($i * $colWidth), 716, $hdrText, 8, true, [0.039, 0.145, 0.251]);
         }
         return 688;
     };

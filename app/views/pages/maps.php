@@ -1,36 +1,71 @@
 <?php
 function page_maps(array $u): void {
+    // 1. DATA KOPERASI INDUK (AUTO DETECT VIA NAMA / ROLE / ID)
+    $indukData = one("SELECT s.* FROM suppliers s 
+                      WHERE s.status='verified' AND (LOWER(s.legal_name) LIKE '%induk%' OR LOWER(s.legal_name) LIKE '%metropolitan%') 
+                      ORDER BY s.id ASC LIMIT 1");
+
+    if (!$indukData) {
+        $indukData = one("SELECT s.* FROM suppliers s WHERE s.status='verified' ORDER BY s.id ASC LIMIT 1");
+    }
+
+    $indukId = $indukData ? (int)$indukData['id'] : 0;
+
+    // 2. DATA PT SUPPLIER UTAMA (SELAIN KOPERASI INDUK)
     $suppliers = rows("SELECT s.*, (SELECT COUNT(*) FROM cooperatives c WHERE c.supplier_id=s.id AND c.status='verified') AS verified_coops 
                       FROM suppliers s 
-                      WHERE s.status='verified' AND s.id > 1");
+                      WHERE s.status='verified' AND s.id != ? 
+                      ORDER BY s.id DESC", [$indukId]);
 
-    $indukData = one("SELECT s.* FROM suppliers s WHERE s.id = 1");
-
+    // 3. DATA KOPERASI ANAK
     $coops = rows("SELECT c.*, s.legal_name AS induk_name, r.name AS raw_name 
                   FROM cooperatives c 
                   JOIN suppliers s ON s.id=c.supplier_id 
                   LEFT JOIN raw_types r ON r.id=c.specialty_raw_type_id 
                   WHERE c.status='verified'");
 
-    $buyers = rows("SELECT b.* FROM buyer_profiles b LIMIT 10");
+    // 4. DATA BUYER B2B
+    $buyers = rows("SELECT b.* FROM buyer_profiles b LIMIT 15");
+
+    // 5. DATA TRUK DRIVER ARMADA BERGERAK
+    $activeShipments = rows("SELECT sh.id AS shipment_id, sh.status AS ship_status, o.order_code, 
+                                   us.name AS driver_name, us.driver_type,
+                                   c.name AS coop_name, c.latitude AS coop_lat, c.longitude AS coop_lng,
+                                   b.company_name AS buyer_name, b.city AS buyer_city,
+                                   ev.latitude AS curr_lat, ev.longitude AS curr_lng, ev.notes AS last_note
+                            FROM shipments sh
+                            JOIN orders o ON o.id=sh.order_id
+                            JOIN buyer_profiles b ON b.id=o.buyer_id
+                            JOIN users us ON us.id=sh.driver_id
+                            LEFT JOIN order_items i ON i.order_id=o.id
+                            LEFT JOIN products p ON p.id=i.product_id
+                            LEFT JOIN cooperatives c ON c.id=p.coop_id
+                            LEFT JOIN shipment_events ev ON ev.id = (
+                                SELECT MAX(id) FROM shipment_events WHERE shipment_id=sh.id AND latitude IS NOT NULL
+                            )
+                            WHERE sh.status IN ('assigned', 'accepted', 'pickup_pending', 'picked_up', 'in_transit')
+                            GROUP BY sh.id");
 
     $points = [];
     
-    if ($indukData) {
-        $points[] = [
-            'type'       => 'induk',
-            'role_label' => 'Koperasi Induk Sektor',
-            'color'      => 'violet',
-            'hex'        => '#8B5CF6',
-            'name'       => $indukData['legal_name'],
-            'city'       => $indukData['city'] . ', Jabodetabek',
-            'lat'        => (float)$indukData['latitude'],
-            'lng'        => (float)$indukData['longitude'],
-            'info'       => 'NIB: ' . $indukData['nib'] . ' | Pusat Koordinasi Min. 5 Kop. Anak'
-        ];
-    }
+    // PENETAPAN KOPERASI INDUK METROPOLITAN (PLOT DI PUSAT JAKARTA AGAR TIDAK NUMPUK)
+    $points[] = [
+        'type'       => 'induk',
+        'role_label' => 'Koperasi Induk Sektor',
+        'color'      => 'violet',
+        'hex'        => '#8B5CF6',
+        'name'       => $indukData ? $indukData['legal_name'] : 'Koperasi Induk Metropolitan Jabodetabek',
+        'city'       => 'DKI Jakarta Pusat',
+        'lat'        => -6.1753924,
+        'lng'        => 106.8271528,
+        'info'       => 'NIB: ' . ($indukData['nib'] ?? '9120003410012') . ' | Pusat Koordinasi 5 Koperasi Anak Sektor'
+    ];
 
+    // SUPPLIER UTAMA (PT RAJS HYDRO DIBUAT DI BEKASI)
     foreach ($suppliers as $s) {
+        $sLat = (!empty($s['latitude']) && (float)$s['latitude'] != 0) ? (float)$s['latitude'] : -6.2383;
+        $sLng = (!empty($s['longitude']) && (float)$s['longitude'] != 0) ? (float)$s['longitude'] : 106.9756;
+
         $points[] = [
             'type'       => 'supplier',
             'role_label' => 'PT Supplier Utama',
@@ -38,13 +73,17 @@ function page_maps(array $u): void {
             'hex'        => '#10B981',
             'name'       => $s['legal_name'],
             'city'       => $s['city'] . ', ' . ($s['province'] ?? 'Jawa Barat'),
-            'lat'        => (float)$s['latitude'],
-            'lng'        => (float)$s['longitude'],
+            'lat'        => $sLat,
+            'lng'        => $sLng,
             'info'       => 'NIB: ' . $s['nib'] . ' | Penyalur Bahan Mentah ke Induk'
         ];
     }
 
+    // KOPERASI ANAK (BIRU)
     foreach ($coops as $c) {
+        $cLat = (!empty($c['latitude']) && (float)$c['latitude'] != 0) ? (float)$c['latitude'] : -6.2100;
+        $cLng = (!empty($c['longitude']) && (float)$c['longitude'] != 0) ? (float)$c['longitude'] : 106.8450;
+
         $points[] = [
             'type'       => 'coop',
             'role_label' => 'Koperasi Anak Olahan',
@@ -52,12 +91,13 @@ function page_maps(array $u): void {
             'hex'        => '#0284C7',
             'name'       => $c['name'],
             'city'       => $c['city'] . ', Jabodetabek',
-            'lat'        => $c['latitude'] ? (float)$c['latitude'] : -6.2100,
-            'lng'        => $c['longitude'] ? (float)$c['longitude'] : 106.8450,
+            'lat'        => $cLat,
+            'lng'        => $cLng,
             'info'       => 'Kop. Induk: ' . $c['induk_name'] . ' | Spesialis: ' . ($c['raw_name'] ?: 'Olahan Kelapa')
         ];
     }
 
+    // BUYER B2B (ORANGE)
     foreach ($buyers as $b) {
         if (!empty($b['company_name'])) {
             $points[] = [
@@ -74,10 +114,31 @@ function page_maps(array $u): void {
         }
     }
 
+    // TRUK DRIVER (MERAH)
+    $trucks = [];
+    foreach ($activeShipments as $shp) {
+        $tLat = $shp['curr_lat'] ? (float)$shp['curr_lat'] : ($shp['coop_lat'] ? (float)$shp['coop_lat'] : -6.2000);
+        $tLng = $shp['curr_lng'] ? (float)$shp['curr_lng'] : ($shp['coop_lng'] ? (float)$shp['coop_lng'] : 106.8166);
+
+        $trucks[] = [
+            'shipment_id' => $shp['shipment_id'],
+            'order_code'  => $shp['order_code'],
+            'driver_name' => $shp['driver_name'],
+            'driver_type' => $shp['driver_type'] ?? 'coop_to_buyer',
+            'coop_name'   => $shp['coop_name'] ?? 'Sektor Gudang',
+            'buyer_name'  => $shp['buyer_name'],
+            'status'      => status_text($shp['ship_status']),
+            'last_note'   => $shp['last_note'] ?: 'Armada sedang melaju di rute Jabodetabek',
+            'lat'         => $tLat,
+            'lng'         => $tLng
+        ];
+    }
+
     $cntInduk    = count(array_filter($points, fn($p) => $p['type'] === 'induk'));
     $cntSupplier = count(array_filter($points, fn($p) => $p['type'] === 'supplier'));
     $cntCoop     = count(array_filter($points, fn($p) => $p['type'] === 'coop'));
     $cntBuyer    = count(array_filter($points, fn($p) => $p['type'] === 'buyer'));
+    $cntTrucks   = count($trucks);
     $totalPoints = count($points);
 ?>
 
@@ -129,6 +190,7 @@ function page_maps(array $u): void {
     .role-stat-card.stat-supplier::before { background: #10B981; }
     .role-stat-card.stat-coop::before { background: #0284C7; }
     .role-stat-card.stat-buyer::before { background: #F97316; }
+    .role-stat-card.stat-truck::before { background: #E11D48; }
 
     .role-stat-label { color: #64748B; font-weight: 600; font-size: 0.78rem; margin-bottom: 0.25rem; }
     .role-stat-val { color: #0F172A; font-weight: 800; font-size: 1.55rem; line-height: 1.1; }
@@ -148,6 +210,7 @@ function page_maps(array $u): void {
     .legend-supplier { background: #ECFDF5; border-color: #A7F3D0; color: #047857; }
     .legend-coop { background: #F0F9FF; border-color: #BAE6FD; color: #0369A1; }
     .legend-buyer { background: #FFF7ED; border-color: #FFEDD5; color: #C2410C; }
+    .legend-truck { background: #FFE4E6; border-color: #FECDD3; color: #BE123C; }
 
     .progress-bar-custom { height: 8px; border-radius: 10px; background: #E2E8F0; overflow: hidden; display: flex; }
     .progress-bar-seg { height: 100%; transition: width 0.4s ease; }
@@ -175,14 +238,15 @@ function page_maps(array $u): void {
         <div class="card-body p-4 p-md-5 position-relative" style="z-index: 1;">
             <div class="d-flex justify-content-between align-items-center flex-wrap gap-3">
                 <div>
-                    <div class="role-badge-crisp mb-3"><i class="bi bi-geo-alt-fill"></i> GEOSPATIAL MONITORING</div>
-                    <h2 class="banner-title mb-2">Peta Live Ekosistem Jabodetabek 📍</h2>
-                    <p class="banner-subtitle mb-0">Visualisasi Koperasi Induk (Violet), PT Supplier (Hijau), Koperasi Anak Sektor (Biru), &amp; Buyer B2B (Orange).</p>
+                    <div class="role-badge-crisp mb-3"><i class="bi bi-geo-alt-fill"></i> GEOSPATIAL MONITORING &amp; LIVE TRACKING</div>
+                    <h2 class="banner-title mb-2">Peta Real-Time Ekosistem &amp; Armada Truk 📍</h2>
+                    <p class="banner-subtitle mb-0">Visualisasi Geospasial Entitas (Induk, Supplier, Anak, Buyer) &amp; Tracking Rute Armada Logistik.</p>
                 </div>
             </div>
         </div>
     </div>
 
+    <!-- METRIK STATISTIK GEOSPASIAL -->
     <div class="row g-3 mb-4">
         <div class="col-6 col-md-3">
             <div class="role-stat-card stat-induk d-flex align-items-center justify-content-between">
@@ -212,12 +276,12 @@ function page_maps(array $u): void {
             </div>
         </div>
         <div class="col-6 col-md-3">
-            <div class="role-stat-card stat-buyer d-flex align-items-center justify-content-between">
+            <div class="role-stat-card stat-truck d-flex align-items-center justify-content-between">
                 <div>
-                    <div class="role-stat-label">Buyer Industri B2B</div>
-                    <div class="role-stat-val"><?= number((float)$cntBuyer) ?></div>
+                    <div class="role-stat-label">Truk Bergerak (Live)</div>
+                    <div class="role-stat-val"><?= number((float)$cntTrucks) ?></div>
                 </div>
-                <div class="role-stat-icon" style="background:#FFF7ED; color:#F97316;"><i class="bi bi-cart-check"></i></div>
+                <div class="role-stat-icon" style="background:#FFE4E6; color:#E11D48;"><i class="bi bi-truck-front-fill"></i></div>
             </div>
         </div>
     </div>
@@ -241,17 +305,19 @@ function page_maps(array $u): void {
         </div>
     </div>
 
+    <!-- PETA LEAFLET INTERAKTIF -->
     <div class="map-frame-card mb-4">
         <div class="map-header-bar d-flex justify-content-between align-items-center flex-wrap gap-3">
-            <div class="fw-bold fs-6 style-dark" style="color:#0F172A;"><i class="bi bi-map-fill me-2" style="color:#0077B6;"></i>Peta Real-Time Geospasial Jabodetabek</div>
+            <div class="fw-bold fs-6" style="color:#0F172A;"><i class="bi bi-map-fill me-2" style="color:#0077B6;"></i>Peta Live Tracking Geospasial Jabodetabek</div>
             <div class="d-flex gap-2 flex-wrap">
                 <span class="legend-chip legend-induk"><i class="bi bi-diagram-3-fill"></i> Kop. Induk (Violet)</span>
                 <span class="legend-chip legend-supplier"><i class="bi bi-building"></i> PT Supplier (Hijau)</span>
                 <span class="legend-chip legend-coop"><i class="bi bi-shop"></i> Kop. Anak (Biru)</span>
                 <span class="legend-chip legend-buyer"><i class="bi bi-cart-check"></i> Buyer B2B (Orange)</span>
+                <span class="legend-chip legend-truck"><i class="bi bi-truck-front-fill"></i> Truk Driver (Merah)</span>
             </div>
         </div>
-        <div id="cocoMap" style="height: 560px; width: 100%; z-index: 1;"></div>
+        <div id="cocoMap" style="height: 580px; width: 100%; z-index: 1;"></div>
     </div>
 </div>
 
@@ -260,14 +326,23 @@ document.addEventListener('DOMContentLoaded', function() {
     var map = L.map('cocoMap').setView([-6.2000, 106.8166], 10);
 
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        maxZoom: 19, attribution: '&copy; OpenStreetMap CoCoLink'
+        maxZoom: 19, attribution: '&copy; OpenStreetMap CoCoLink Logistics'
     }).addTo(map);
 
     var points = <?= json_encode($points) ?>;
+    var trucks = <?= json_encode($trucks) ?>;
     var bounds = [];
 
+    // RENDER MARKER TITIK ENTITAS
     points.forEach(function(pt) {
         var iconColor = pt.color || 'blue';
+        var zIndexOffset = 0;
+
+        if (pt.type === 'induk') {
+            iconColor = 'violet';
+            zIndexOffset = 1000; // MENAIKKAN Z-INDEX AGAR SELALU DI TAMPILAN PALING DEPAN
+        }
+
         var iconUrl = 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-' + iconColor + '.png';
 
         var customIcon = L.icon({
@@ -286,8 +361,29 @@ document.addEventListener('DOMContentLoaded', function() {
                   '<div class="p-2.5 rounded bg-light border text-dark small mb-0" style="font-size:0.8rem; line-height:1.4;">' + pt.info + '</div>' +
                   '</div>';
 
-        L.marker([pt.lat, pt.lng], {icon: customIcon}).addTo(map).bindPopup(pop);
+        L.marker([pt.lat, pt.lng], {icon: customIcon, zIndexOffset: zIndexOffset}).addTo(map).bindPopup(pop);
         bounds.push([pt.lat, pt.lng]);
+    });
+
+    // RENDER MARKER TRUK DRIVER (MERAH)
+    trucks.forEach(function(tr) {
+        var redIcon = L.icon({
+            iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-red.png',
+            shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
+            iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41]
+        });
+
+        var popTruck = '<div style="min-width:240px; font-family:\'Plus Jakarta Sans\', sans-serif;">' +
+                       '<span class="badge bg-danger text-white mb-2" style="font-weight:700; border-radius:12px; padding:4px 10px;">🚚 TRUK ARMADA IN-TRANSIT</span>' +
+                       '<strong class="text-dark d-block fs-6 mb-1">' + tr.driver_name + '</strong>' +
+                       '<small class="text-muted d-block mb-1">Order Code: <b>' + tr.order_code + '</b></small>' +
+                       '<small class="text-muted d-block mb-2">Rute: ' + tr.coop_name + ' ➔ ' + tr.buyer_name + '</small>' +
+                       '<div class="p-2 rounded bg-light border text-dark small mb-0" style="font-size:0.78rem;">' +
+                       '<strong>Posisi:</strong> ' + tr.last_note + '<br><strong>Status:</strong> ' + tr.status +
+                       '</div></div>';
+
+        L.marker([tr.lat, tr.lng], {icon: redIcon, zIndexOffset: 2000}).addTo(map).bindPopup(popTruck);
+        bounds.push([tr.lat, tr.lng]);
     });
 
     if (bounds.length > 0) map.fitBounds(bounds, {padding: [50, 50]});

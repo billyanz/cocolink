@@ -1,10 +1,16 @@
 <?php
-function page_allocations(array $u): void {
-    $isCoop   = $u['role'] === 'coop';
-    $isInduk  = $u['role'] === 'induk';
-    $isSuper  = $u['role'] === 'super_admin';
-    $canAllocate = $isInduk || $isSuper;
+declare(strict_types=1);
 
+function page_allocations(array $u): void {
+    $role     = $u['role'] ?? '';
+    $isCoop   = $role === 'coop';
+    $isInduk  = $role === 'induk';
+    $isSupp   = $role === 'supplier';
+    $isSuper  = $role === 'super_admin';
+
+    $canAllocate = $isInduk || $isSuper || $isSupp;
+
+    // QUERY UNIVERSAL: Mengambil seluruh alokasi agar selalu tampil transparan di tabel
     if ($isCoop) {
         $userCoopId = (int)($u['coop_id'] ?? 0);
         $userSuppId = (int)($u['supplier_id'] ?? 0);
@@ -15,32 +21,34 @@ function page_allocations(array $u): void {
                        JOIN raw_types r ON r.id=b.raw_type_id
                        JOIN suppliers s ON s.id=b.supplier_id
                        JOIN cooperatives c ON c.id=a.coop_id
-                       WHERE a.coop_id = ? 
-                          OR (c.supplier_id = ? AND ? > 0)
-                          OR a.coop_id IN (SELECT id FROM cooperatives WHERE supplier_id = ? AND ? > 0)
-                       ORDER BY a.id DESC", [$userCoopId, $userSuppId, $userSuppId, $userSuppId, $userSuppId]);
+                       WHERE a.coop_id = ? OR ? = 0 OR a.coop_id > 0
+                       ORDER BY a.id DESC", [$userCoopId, $userCoopId]);
     } else {
-        $sid = (int)($u['supplier_id'] ?? 0);
         $allocs = rows("SELECT a.*, b.batch_code, r.name AS raw_name, s.legal_name AS supplier_name, c.name AS coop_name
                        FROM allocations a
                        JOIN raw_batches b ON b.id=a.batch_id
                        JOIN raw_types r ON r.id=b.raw_type_id
                        JOIN suppliers s ON s.id=b.supplier_id
                        JOIN cooperatives c ON c.id=a.coop_id
-                       " . ($sid && !$isSuper ? "WHERE b.supplier_id = {$sid}" : "") . "
                        ORDER BY a.id DESC");
     }
 
-    $batches = $canAllocate ? rows("SELECT b.id, b.batch_code, r.name AS raw_name, b.quantity 
-                                   FROM raw_batches b 
-                                   JOIN raw_types r ON r.id=b.raw_type_id 
-                                   " . ($u['supplier_id'] && !$isSuper ? "WHERE b.supplier_id = {$u['supplier_id']}" : "") . "
-                                   ORDER BY b.id DESC") : [];
+    // AMBIL DATA BATCH DAN KOPERASI ANAK UNTUK DROPDOWN
+    if ($canAllocate) {
+        $batches = rows("SELECT b.id, b.batch_code, r.name AS raw_name, s.legal_name AS supplier_name, b.quantity,
+                               (b.quantity - COALESCE((SELECT SUM(quantity) FROM allocations WHERE batch_id = b.id AND status != 'rejected'), 0)) AS remaining_qty
+                        FROM raw_batches b
+                        JOIN raw_types r ON r.id = b.raw_type_id
+                        JOIN suppliers s ON s.id = b.supplier_id
+                        ORDER BY b.id DESC");
 
-    $coops = $canAllocate ? rows("SELECT c.id, c.name 
-                                 FROM cooperatives c 
-                                 WHERE c.status='verified' " . ($u['supplier_id'] && !$isSuper ? "AND c.supplier_id = {$u['supplier_id']}" : "") . "
-                                 ORDER BY c.name") : [];
+        $coops = rows("SELECT c.id, c.name 
+                      FROM cooperatives c 
+                      ORDER BY c.name");
+    } else {
+        $batches = [];
+        $coops   = [];
+    }
 ?>
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -137,7 +145,8 @@ function page_allocations(array $u): void {
                         <?php 
                         $batchOpts = [];
                         foreach ($batches as $bt) {
-                            $batchOpts[$bt['id']] = $bt['batch_code'] . ' - ' . $bt['raw_name'] . ' (' . number($bt['quantity']) . ' kg)';
+                            $rem = max(0, (float)$bt['remaining_qty']);
+                            $batchOpts[$bt['id']] = $bt['batch_code'] . ' - ' . $bt['raw_name'] . ' (' . $bt['supplier_name'] . ') [Sisa: ' . number($rem) . ' kg]';
                         }
                         select_field('Pilih Batch Limbah Mentah PT Supplier', 'batch_id', $batchOpts);
                         ?>
