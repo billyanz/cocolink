@@ -6,8 +6,8 @@ require_once __DIR__ . '/../config/auth.php';
 class CoCoLinkSystem {
     private PDO $pdo;
 
-    public function __construct() {
-        $this->pdo = getDBConnection();
+    public function __construct(?PDO $pdo = null) {
+        $this->pdo = $pdo ?? getDBConnection();
     }
 
     /**
@@ -51,6 +51,10 @@ class CoCoLinkSystem {
 
         $this->pdo->beginTransaction();
         try {
+            $stmt = $this->pdo->prepare("SELECT id FROM users WHERE id = ? AND role = 'induk' AND status = 'active'");
+            $stmt->execute([$adminUserId]);
+            if (!$stmt->fetch()) throw new Exception("Only an Induk user can allocate stock.");
+
             // Lock inventory row to prevent race condition
             $stmt = $this->pdo->prepare("SELECT material_id FROM order_items WHERE id = ?");
             $stmt->execute([$orderItemId]);
@@ -96,11 +100,19 @@ class CoCoLinkSystem {
 
         $this->pdo->beginTransaction();
         try {
+            $stmt = $this->pdo->prepare("SELECT a.id, a.cooperative_id
+                                         FROM allocations a
+                                         JOIN users u ON u.id=? AND u.role='anak' AND u.cooperative_id=a.cooperative_id
+                                         WHERE a.id=? FOR UPDATE");
+            $stmt->execute([$coopUserId, $allocationId]);
+            $allocation = $stmt->fetch();
+            if (!$allocation) throw new Exception("Allocation not found or not assigned to this cooperative.");
+
             $stmt = $this->pdo->prepare("INSERT INTO weighing_records (allocation_id, gross_weight, tare_weight, net_weight, weighmaster_name, notes) VALUES (?, ?, ?, ?, ?, ?)");
             $stmt->execute([$allocationId, $gross, $tare, $net, $weighmaster, $notes]);
 
-            $stmt = $this->pdo->prepare("UPDATE allocations SET prepared_qty = ?, status = 'weighed' WHERE id = ?");
-            $stmt->execute([$net, $allocationId]);
+            $stmt = $this->pdo->prepare("UPDATE allocations SET prepared_qty = ?, status = 'weighed' WHERE id = ? AND cooperative_id = ?");
+            $stmt->execute([$net, $allocationId, $allocation['cooperative_id']]);
 
             logAudit($this->pdo, $coopUserId, 'WEIGHING_RECORD', "Recorded weighing for Allocation #{$allocationId}: Gross {$gross}T, Tare {$tare}T, Net {$net}T");
             $this->pdo->commit();
@@ -117,14 +129,24 @@ class CoCoLinkSystem {
     public function createShipment(int $allocationId, int $driverId, float $dispatchedQty, int $adminUserId): array {
         $this->pdo->beginTransaction();
         try {
+            $stmt = $this->pdo->prepare("SELECT a.cooperative_id
+                                         FROM allocations a
+                                         JOIN users u ON u.id=?
+                                         WHERE a.id=?
+                                           AND (u.role='induk' OR (u.role='anak' AND u.cooperative_id=a.cooperative_id))
+                                         FOR UPDATE");
+            $stmt->execute([$adminUserId, $allocationId]);
+            $allocation = $stmt->fetch();
+            if (!$allocation) throw new Exception("Allocation not found or outside the caller's cooperative scope.");
+
             $tracking = "TRK-" . date('Ymd') . "-" . rand(10000, 99999);
 
             $stmt = $this->pdo->prepare("INSERT INTO shipments (tracking_number, allocation_id, driver_id, dispatched_qty, status, dispatched_at) VALUES (?, ?, ?, ?, 'assigned', NOW())");
             $stmt->execute([$tracking, $allocationId, $driverId, $dispatchedQty]);
             $shipmentId = (int)$this->pdo->lastInsertId();
 
-            $stmt = $this->pdo->prepare("UPDATE allocations SET status = 'in_transit' WHERE id = ?");
-            $stmt->execute([$allocationId]);
+            $stmt = $this->pdo->prepare("UPDATE allocations SET status = 'in_transit' WHERE id = ? AND cooperative_id = ?");
+            $stmt->execute([$allocationId, $allocation['cooperative_id']]);
 
             logAudit($this->pdo, $adminUserId, 'SHIPMENT_DISPATCH', "Assigned Driver #{$driverId} to Shipment {$tracking}");
             $this->pdo->commit();
@@ -173,11 +195,20 @@ class CoCoLinkSystem {
     public function confirmReceipt(int $shipmentId, float $actualReceivedQty, string $notes, int $buyerUserId): array {
         $this->pdo->beginTransaction();
         try {
-            $stmt = $this->pdo->prepare("SELECT s.*, a.allocated_qty, a.order_item_id FROM shipments s JOIN allocations a ON s.allocation_id = a.id WHERE s.id = ?");
-            $stmt->execute([$shipmentId]);
+            $stmt = $this->pdo->prepare("SELECT s.*, a.allocated_qty, a.order_item_id
+                                         FROM shipments s
+                                         JOIN allocations a ON s.allocation_id=a.id
+                                         JOIN order_items oi ON oi.id=a.order_item_id
+                                         JOIN orders o ON o.id=oi.order_id
+                                         WHERE s.id=? AND o.buyer_id=?
+                                         FOR UPDATE");
+            $stmt->execute([$shipmentId, $buyerUserId]);
             $shipment = $stmt->fetch();
 
-            if (!$shipment) throw new Exception("Shipment record not found.");
+            if (!$shipment) throw new Exception("Shipment record not found or not assigned to this buyer.");
+            if ($shipment['status'] !== 'delivered') {
+                throw new Exception("Shipment has not been marked delivered by the driver.");
+            }
 
             $dispatched = (float)$shipment['dispatched_qty'];
             if ($actualReceivedQty < $dispatched) {
@@ -213,6 +244,10 @@ class CoCoLinkSystem {
     public function resolveDiscrepancy(int $discrepancyId, string $resolution, int $resolvedByUserId): array {
         $this->pdo->beginTransaction();
         try {
+            $stmt = $this->pdo->prepare("SELECT id FROM users WHERE id = ? AND role = 'induk' AND status = 'active'");
+            $stmt->execute([$resolvedByUserId]);
+            if (!$stmt->fetch()) throw new Exception("Only an Induk user can resolve discrepancies.");
+
             $stmt = $this->pdo->prepare("SELECT d.*, s.allocation_id, a.order_item_id FROM discrepancies d JOIN shipments s ON d.shipment_id = s.id JOIN allocations a ON s.allocation_id = a.id WHERE d.id = ?");
             $stmt->execute([$discrepancyId]);
             $disc = $stmt->fetch();

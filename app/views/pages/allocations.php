@@ -10,10 +10,8 @@ function page_allocations(array $u): void {
 
     $canAllocate = $isInduk || $isSuper || $isSupp;
 
-    // QUERY UNIVERSAL: Mengambil seluruh alokasi agar selalu tampil transparan di tabel
     if ($isCoop) {
         $userCoopId = (int)($u['coop_id'] ?? 0);
-        $userSuppId = (int)($u['supplier_id'] ?? 0);
 
         $allocs = rows("SELECT a.*, b.batch_code, r.name AS raw_name, s.legal_name AS supplier_name, c.name AS coop_name
                        FROM allocations a
@@ -21,9 +19,20 @@ function page_allocations(array $u): void {
                        JOIN raw_types r ON r.id=b.raw_type_id
                        JOIN suppliers s ON s.id=b.supplier_id
                        JOIN cooperatives c ON c.id=a.coop_id
-                       WHERE a.coop_id = ? OR ? = 0 OR a.coop_id > 0
-                       ORDER BY a.id DESC", [$userCoopId, $userCoopId]);
-    } else {
+                       WHERE a.coop_id=?
+                       ORDER BY a.id DESC", [$userCoopId]);
+    } elseif ($isSupp) {
+        $supplierId = (int)($u['supplier_id'] ?? 0);
+
+        $allocs = rows("SELECT a.*, b.batch_code, r.name AS raw_name, s.legal_name AS supplier_name, c.name AS coop_name
+                       FROM allocations a
+                       JOIN raw_batches b ON b.id=a.batch_id
+                       JOIN raw_types r ON r.id=b.raw_type_id
+                       JOIN suppliers s ON s.id=b.supplier_id
+                       JOIN cooperatives c ON c.id=a.coop_id
+                       WHERE b.supplier_id=? AND c.supplier_id=?
+                       ORDER BY a.id DESC", [$supplierId, $supplierId]);
+    } elseif ($isSuper || $isInduk) {
         $allocs = rows("SELECT a.*, b.batch_code, r.name AS raw_name, s.legal_name AS supplier_name, c.name AS coop_name
                        FROM allocations a
                        JOIN raw_batches b ON b.id=a.batch_id
@@ -31,20 +40,31 @@ function page_allocations(array $u): void {
                        JOIN suppliers s ON s.id=b.supplier_id
                        JOIN cooperatives c ON c.id=a.coop_id
                        ORDER BY a.id DESC");
+    } else {
+        $allocs = [];
     }
 
     // AMBIL DATA BATCH DAN KOPERASI ANAK UNTUK DROPDOWN
     if ($canAllocate) {
-        $batches = rows("SELECT b.id, b.batch_code, r.name AS raw_name, s.legal_name AS supplier_name, b.quantity,
-                               (b.quantity - COALESCE((SELECT SUM(quantity) FROM allocations WHERE batch_id = b.id AND status != 'rejected'), 0)) AS remaining_qty
-                        FROM raw_batches b
-                        JOIN raw_types r ON r.id = b.raw_type_id
-                        JOIN suppliers s ON s.id = b.supplier_id
-                        ORDER BY b.id DESC");
-
-        $coops = rows("SELECT c.id, c.name 
-                      FROM cooperatives c 
-                      ORDER BY c.name");
+        if ($isSuper || $isInduk) {
+            $batches = rows("SELECT b.id, b.batch_code, r.name AS raw_name, s.legal_name AS supplier_name, b.quantity,
+                                   (b.quantity - COALESCE((SELECT SUM(quantity) FROM allocations WHERE batch_id = b.id AND status != 'rejected'), 0)) AS remaining_qty
+                            FROM raw_batches b
+                            JOIN raw_types r ON r.id = b.raw_type_id
+                            JOIN suppliers s ON s.id = b.supplier_id
+                            ORDER BY b.id DESC");
+            $coops = rows("SELECT c.id, c.name FROM cooperatives c ORDER BY c.name");
+        } else {
+            $supplierId = (int)($u['supplier_id'] ?? 0);
+            $batches = rows("SELECT b.id, b.batch_code, r.name AS raw_name, s.legal_name AS supplier_name, b.quantity,
+                                   (b.quantity - COALESCE((SELECT SUM(quantity) FROM allocations WHERE batch_id = b.id AND status != 'rejected'), 0)) AS remaining_qty
+                            FROM raw_batches b
+                            JOIN raw_types r ON r.id = b.raw_type_id
+                            JOIN suppliers s ON s.id = b.supplier_id
+                            WHERE b.supplier_id=?
+                            ORDER BY b.id DESC", [$supplierId]);
+            $coops = rows("SELECT c.id, c.name FROM cooperatives c WHERE c.supplier_id=? ORDER BY c.name", [$supplierId]);
+        }
     } else {
         $batches = [];
         $coops   = [];

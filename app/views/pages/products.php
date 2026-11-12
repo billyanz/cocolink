@@ -19,13 +19,29 @@ function page_products(array $u): void {
                             WHERE a.coop_id=? AND a.status='accepted' 
                             ORDER BY a.id DESC", [$u['coop_id']]);
     } elseif ($isInduk) {
-        $sid = (int)($u['supplier_id'] ?? 0);
-        $products = rows("SELECT p.*, c.name AS coop_name, r.name AS raw_name 
-                         FROM products p 
-                         JOIN cooperatives c ON c.id=p.coop_id 
-                         JOIN raw_types r ON r.id=p.raw_type_id 
-                         WHERE c.supplier_id=? 
-                         ORDER BY p.id DESC", [$sid]);
+        $supplierId = (int)($u['supplier_id'] ?? 0);
+        $products = rows("SELECT p.*, c.name AS coop_name, r.name AS raw_name
+                         FROM products p
+                         JOIN cooperatives c ON c.id=p.coop_id
+                         JOIN raw_types r ON r.id=p.raw_type_id
+                         WHERE c.supplier_id=?
+                         ORDER BY p.id DESC", [$supplierId]);
+        $allocations = [];
+    } elseif ($isSuper) {
+        $products = rows("SELECT p.*, c.name AS coop_name, r.name AS raw_name
+                         FROM products p
+                         JOIN cooperatives c ON c.id=p.coop_id
+                         JOIN raw_types r ON r.id=p.raw_type_id
+                         ORDER BY p.id DESC");
+        $allocations = [];
+    } elseif ($u['role'] === 'supplier') {
+        $supplierId = (int)($u['supplier_id'] ?? 0);
+        $products = rows("SELECT p.*, c.name AS coop_name, r.name AS raw_name
+                         FROM products p
+                         JOIN cooperatives c ON c.id=p.coop_id
+                         JOIN raw_types r ON r.id=p.raw_type_id
+                         WHERE c.supplier_id=?
+                         ORDER BY p.id DESC", [$supplierId]);
         $allocations = [];
     } else {
         $products = rows("SELECT p.*, c.name AS coop_name, r.name AS raw_name 

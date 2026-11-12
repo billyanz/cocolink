@@ -42,21 +42,95 @@ function page_shipments(array $u): void {
     if ($driver) {
         $ships = rows($query . ' WHERE sh.driver_id=? GROUP BY sh.id ORDER BY sh.id DESC', [(int)$u['id']]);
     } elseif ($isCoop) {
-        $ships = rows($query . ' WHERE p.coop_id=? GROUP BY sh.id ORDER BY sh.id DESC', [(int)($u['coop_id'] ?? 0)]);
+        $coopId = (int)($u['coop_id'] ?? 0);
+        $ships = rows($query . ' WHERE p.coop_id=?
+                                 AND NOT EXISTS (
+                                     SELECT 1 FROM order_items i2
+                                     LEFT JOIN products p2 ON p2.id=i2.product_id
+                                     WHERE i2.order_id=o.id AND (p2.id IS NULL OR p2.coop_id<>?)
+                                 )
+                                 GROUP BY sh.id ORDER BY sh.id DESC', [$coopId, $coopId]);
     } elseif ($isBuyer) {
         $ships = rows($query . ' WHERE o.buyer_id=? GROUP BY sh.id ORDER BY sh.id DESC', [(int)($u['buyer_id'] ?? 0)]);
+    } elseif ($isSupp) {
+        $supplierId = (int)($u['supplier_id'] ?? 0);
+        $ships = rows($query . ' WHERE EXISTS (
+                                    SELECT 1 FROM order_items i2
+                                    JOIN products p2 ON p2.id=i2.product_id
+                                    JOIN cooperatives c2 ON c2.id=p2.coop_id
+                                    WHERE i2.order_id=o.id AND c2.supplier_id=?
+                                ) AND NOT EXISTS (
+                                    SELECT 1 FROM order_items i2
+                                    LEFT JOIN products p2 ON p2.id=i2.product_id
+                                    LEFT JOIN cooperatives c2 ON c2.id=p2.coop_id
+                                    WHERE i2.order_id=o.id AND (p2.id IS NULL OR c2.id IS NULL OR c2.supplier_id<>?)
+                                )
+                                GROUP BY sh.id ORDER BY sh.id DESC', [$supplierId, $supplierId]);
     } else {
         $ships = rows($query . ' GROUP BY sh.id ORDER BY sh.id DESC');
     }
 
     // Pesanan yang belum ditugaskan driver
-    $assignable = $manager ? rows("SELECT id, order_code FROM orders WHERE status IN ('approved', 'requested') AND id NOT IN (SELECT order_id FROM shipments WHERE driver_id IS NOT NULL) ORDER BY id DESC") : [];
+    $assignable = [];
+    $orderScope = '';
+    $orderParams = [];
+    if ($isCoop) {
+        $coopId = (int)($u['coop_id'] ?? 0);
+        $orderScope = " AND EXISTS (
+                            SELECT 1 FROM order_items i2
+                            JOIN products p2 ON p2.id=i2.product_id
+                            WHERE i2.order_id=o.id AND p2.coop_id=?
+                        ) AND NOT EXISTS (
+                            SELECT 1 FROM order_items i3
+                            LEFT JOIN products p3 ON p3.id=i3.product_id
+                            WHERE i3.order_id=o.id AND (p3.id IS NULL OR p3.coop_id<>?)
+                        )";
+        $orderParams = [$coopId, $coopId];
+    } elseif ($isSupp) {
+        $supplierId = (int)($u['supplier_id'] ?? 0);
+        $orderScope = " AND EXISTS (
+                            SELECT 1 FROM order_items i2
+                            JOIN products p2 ON p2.id=i2.product_id
+                            JOIN cooperatives c2 ON c2.id=p2.coop_id
+                            WHERE i2.order_id=o.id AND c2.supplier_id=?
+                        ) AND NOT EXISTS (
+                            SELECT 1 FROM order_items i3
+                            LEFT JOIN products p3 ON p3.id=i3.product_id
+                            LEFT JOIN cooperatives c3 ON c3.id=p3.coop_id
+                            WHERE i3.order_id=o.id AND (p3.id IS NULL OR c3.id IS NULL OR c3.supplier_id<>?)
+                        )";
+        $orderParams = [$supplierId, $supplierId];
+    }
+    if ($manager) {
+        $assignable = rows("SELECT o.id, o.order_code FROM orders o
+                            WHERE o.status IN ('approved', 'requested')
+                              AND o.id NOT IN (SELECT order_id FROM shipments WHERE driver_id IS NOT NULL)" .
+                            $orderScope . " ORDER BY o.id DESC", $orderParams);
+    }
     
     // Daftar Driver Aktif beserta Kategori Rutenya
-    $drivers = $manager ? rows("SELECT id, name, driver_type FROM users WHERE LOWER(role)='driver' AND is_active=1 ORDER BY name ASC") : [];
+    if (!$manager) {
+        $drivers = [];
+    } elseif ($isCoop) {
+        $drivers = rows("SELECT id, name, driver_type FROM users WHERE LOWER(role)='driver' AND is_active=1 AND coop_id=? ORDER BY name ASC", [(int)($u['coop_id'] ?? 0)]);
+    } elseif ($isSupp) {
+        $drivers = rows("SELECT id, name, driver_type FROM users WHERE LOWER(role)='driver' AND is_active=1 AND supplier_id=? ORDER BY name ASC", [(int)($u['supplier_id'] ?? 0)]);
+    } else {
+        $drivers = rows("SELECT id, name, driver_type FROM users WHERE LOWER(role)='driver' AND is_active=1 ORDER BY name ASC");
+    }
     
     // Log Histori Event Logistik Digital
-    $events = $ships ? rows('SELECT ev.*, ev.notes AS note, u.name AS actor_name FROM shipment_events ev JOIN users u ON u.id=ev.actor_id ORDER BY ev.id DESC LIMIT 300') : [];
+    $shipmentIds = array_map(fn($ship) => (int)$ship['id'], $ships);
+    if ($shipmentIds) {
+        $placeholders = implode(',', array_fill(0, count($shipmentIds), '?'));
+        $events = rows("SELECT ev.*, ev.notes AS note, u.name AS actor_name
+                        FROM shipment_events ev
+                        JOIN users u ON u.id=ev.actor_id
+                        WHERE ev.shipment_id IN ($placeholders)
+                        ORDER BY ev.id DESC LIMIT 300", $shipmentIds);
+    } else {
+        $events = [];
+    }
 
     $by = [];
     foreach ($events as $ev) {

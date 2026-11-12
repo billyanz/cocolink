@@ -28,7 +28,7 @@ function render_page(string $page, array $u): void {
                 'orders'       => page_orders($u),
                 'shipments'    => page_shipments($u),
                 'maps'         => page_maps($u),
-                'reports'      => page_reports(),
+                'reports'      => page_reports($u),
                 'audit'        => page_audit($u),
                 default        => page_dashboard($u)
             };

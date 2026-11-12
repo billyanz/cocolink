@@ -36,8 +36,8 @@ function page_dashboard(array $u): void {
         $totSuppliers = 1;
         $totCoops     = 1;
         $totBatches   = val("SELECT COALESCE(SUM(quantity),0) FROM allocations WHERE coop_id=? AND status='accepted'", [$cid]);
-        $onGoing      = val("SELECT COUNT(*) FROM orders o JOIN order_items i ON i.order_id=i.order_id JOIN products p ON p.id=i.product_id WHERE p.coop_id=? AND o.status IN ('approved','assigned','in_transit','pickup_pending')", [$cid]);
-        $completed    = val("SELECT COUNT(*) FROM orders o JOIN order_items i ON i.order_id=i.order_id JOIN products p ON p.id=i.product_id WHERE p.coop_id=? AND o.status='completed'", [$cid]);
+        $onGoing      = val("SELECT COUNT(*) FROM orders o JOIN order_items i ON i.order_id=o.id JOIN products p ON p.id=i.product_id WHERE p.coop_id=? AND o.status IN ('approved','assigned','in_transit','pickup_pending')", [$cid]);
+        $completed    = val("SELECT COUNT(*) FROM orders o JOIN order_items i ON i.order_id=o.id JOIN products p ON p.id=i.product_id WHERE p.coop_id=? AND o.status='completed'", [$cid]);
     } else {
         $totSuppliers = val("SELECT COUNT(*) FROM suppliers WHERE status='verified'");
         $totCoops     = val("SELECT COUNT(*) FROM cooperatives WHERE status='verified'");

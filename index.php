@@ -44,7 +44,7 @@ try {
         'catalog'      => must_role(['buyer']),
         'orders'       => must_role(['super_admin', 'induk', 'supplier', 'coop', 'buyer']),
         'shipments'    => must_role(['super_admin', 'induk', 'supplier', 'coop', 'driver', 'buyer']),
-        'reports'      => must_role(['super_admin', 'induk', 'supplier']),
+        'reports'      => must_role(['super_admin', 'induk', 'supplier', 'coop']),
         'audit'        => must_role(['super_admin']),
         default        => redirect('dashboard')
     };

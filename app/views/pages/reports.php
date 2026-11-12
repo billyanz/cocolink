@@ -3,13 +3,52 @@ declare(strict_types=1);
 
 function page_reports(array $u): void {
     must_role(['super_admin', 'induk', 'supplier', 'coop']);
+    $canExportReports = in_array($u['role'], ['super_admin', 'induk'], true);
 
     // Query Tren Penjualan 30 Hari Terakhir
-    $stats = rows("SELECT DATE(created_at) AS day, COUNT(*) AS total_orders, COALESCE(SUM(total),0) AS sales 
-                   FROM orders 
-                   WHERE status NOT IN ('rejected','requested') 
-                   GROUP BY DATE(created_at) 
-                   ORDER BY day DESC LIMIT 30");
+    if ($u['role'] === 'supplier') {
+        $supplierId = (int)($u['supplier_id'] ?? 0);
+        $stats = rows("SELECT DATE(o.created_at) AS day, COUNT(*) AS total_orders, COALESCE(SUM(o.total),0) AS sales
+                       FROM orders o
+                       WHERE o.status NOT IN ('rejected','requested')
+                         AND EXISTS (
+                             SELECT 1 FROM order_items i
+                             JOIN products p ON p.id=i.product_id
+                             JOIN cooperatives c ON c.id=p.coop_id
+                             WHERE i.order_id=o.id AND c.supplier_id=?
+                         )
+                         AND NOT EXISTS (
+                             SELECT 1 FROM order_items i
+                             LEFT JOIN products p ON p.id=i.product_id
+                             LEFT JOIN cooperatives c ON c.id=p.coop_id
+                             WHERE i.order_id=o.id AND (p.id IS NULL OR c.id IS NULL OR c.supplier_id<>?)
+                         )
+                       GROUP BY DATE(o.created_at)
+                       ORDER BY day DESC LIMIT 30", [$supplierId, $supplierId]);
+    } elseif ($u['role'] === 'coop') {
+        $coopId = (int)($u['coop_id'] ?? 0);
+        $stats = rows("SELECT DATE(o.created_at) AS day, COUNT(*) AS total_orders, COALESCE(SUM(o.total),0) AS sales
+                       FROM orders o
+                       WHERE o.status NOT IN ('rejected','requested')
+                         AND EXISTS (
+                             SELECT 1 FROM order_items i
+                             JOIN products p ON p.id=i.product_id
+                             WHERE i.order_id=o.id AND p.coop_id=?
+                         )
+                         AND NOT EXISTS (
+                             SELECT 1 FROM order_items i
+                             LEFT JOIN products p ON p.id=i.product_id
+                             WHERE i.order_id=o.id AND (p.id IS NULL OR p.coop_id<>?)
+                         )
+                       GROUP BY DATE(o.created_at)
+                       ORDER BY day DESC LIMIT 30", [$coopId, $coopId]);
+    } else {
+        $stats = rows("SELECT DATE(created_at) AS day, COUNT(*) AS total_orders, COALESCE(SUM(total),0) AS sales
+                       FROM orders
+                       WHERE status NOT IN ('rejected','requested')
+                       GROUP BY DATE(created_at)
+                       ORDER BY day DESC LIMIT 30");
+    }
 
     $totalSales = array_sum(array_column($stats, 'sales'));
     $totalCount = array_sum(array_column($stats, 'total_orders'));
@@ -112,6 +151,7 @@ function page_reports(array $u): void {
                     <div class="flex-grow-1">
                         <h5 class="fw-bold mb-1 text-dark">Rekapitulasi Transaksi Pesanan</h5>
                         <p class="text-secondary small mb-3">Laporan seluruh transaksi pesanan B2B, status persetujuan, detail buyer, dan total nominal bayar.</p>
+                        <?php if ($canExportReports): ?>
                         <div class="d-flex flex-wrap gap-2">
                             <a class="btn btn-coco-pdf text-decoration-none" target="_blank" href="download.php?type=orders&format=pdf">
                                 <i class="bi bi-file-pdf-fill me-1"></i> Cetak PDF
@@ -120,6 +160,7 @@ function page_reports(array $u): void {
                                 <i class="bi bi-file-excel-fill me-1"></i> Ekspor Excel (.xlsx)
                             </a>
                         </div>
+                        <?php endif; ?>
                     </div>
                 </div>
             </div>
@@ -132,6 +173,7 @@ function page_reports(array $u): void {
                     <div class="flex-grow-1">
                         <h5 class="fw-bold mb-1 text-dark">Rekapitulasi Bahan Mentah Pasokan</h5>
                         <p class="text-secondary small mb-3">Ringkasan batch limbah kelapa mentah, entitas PT Supplier penerbit, spesialisasi bahan, dan kuantitas alokasi.</p>
+                        <?php if ($canExportReports): ?>
                         <div class="d-flex flex-wrap gap-2">
                             <a class="btn btn-coco-pdf text-decoration-none" target="_blank" href="download.php?type=batches&format=pdf">
                                 <i class="bi bi-file-pdf-fill me-1"></i> Cetak PDF
@@ -140,6 +182,7 @@ function page_reports(array $u): void {
                                 <i class="bi bi-file-excel-fill me-1"></i> Ekspor Excel (.xlsx)
                             </a>
                         </div>
+                        <?php endif; ?>
                     </div>
                 </div>
             </div>
@@ -152,6 +195,7 @@ function page_reports(array $u): void {
                     <div class="flex-grow-1">
                         <h5 class="fw-bold mb-1 text-dark">Inventaris Produk Olahan Koperasi</h5>
                         <p class="text-secondary small mb-3">Daftar stok barang hasil olahan limbah, harga per kilogram, dan Koperasi Anak Sektor pengolah.</p>
+                        <?php if ($canExportReports): ?>
                         <div class="d-flex flex-wrap gap-2">
                             <a class="btn btn-coco-pdf text-decoration-none" target="_blank" href="download.php?type=products&format=pdf">
                                 <i class="bi bi-file-pdf-fill me-1"></i> Cetak PDF
@@ -160,6 +204,7 @@ function page_reports(array $u): void {
                                 <i class="bi bi-file-excel-fill me-1"></i> Ekspor Excel (.xlsx)
                             </a>
                         </div>
+                        <?php endif; ?>
                     </div>
                 </div>
             </div>
@@ -172,6 +217,7 @@ function page_reports(array $u): void {
                     <div class="flex-grow-1">
                         <h5 class="fw-bold mb-1 text-dark">Rekapitulasi Pengiriman Logistik</h5>
                         <p class="text-secondary small mb-3">Tugas pengiriman driver mitra, status transit muatan, rute antar-wilayah, dan log resi digital.</p>
+                        <?php if ($canExportReports): ?>
                         <div class="d-flex flex-wrap gap-2">
                             <a class="btn btn-coco-pdf text-decoration-none" target="_blank" href="download.php?type=shipments&format=pdf">
                                 <i class="bi bi-file-pdf-fill me-1"></i> Cetak PDF
@@ -180,6 +226,7 @@ function page_reports(array $u): void {
                                 <i class="bi bi-file-excel-fill me-1"></i> Ekspor Excel (.xlsx)
                             </a>
                         </div>
+                        <?php endif; ?>
                     </div>
                 </div>
             </div>

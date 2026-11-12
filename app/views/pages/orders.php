@@ -18,7 +18,31 @@ function page_orders(array $u): void {
     if ($isBuyer) {
         $orders = rows($query . " WHERE o.buyer_id=? ORDER BY o.id DESC", [(int)($u['buyer_id'] ?? 0)]);
     } elseif ($isCoop) {
-        $orders = rows($query . " WHERE o.id IN (SELECT i2.order_id FROM order_items i2 JOIN products p2 ON p2.id=i2.product_id WHERE p2.coop_id=?) ORDER BY o.id DESC", [(int)($u['coop_id'] ?? 0)]);
+        $coopId = (int)($u['coop_id'] ?? 0);
+        $orders = rows($query . " WHERE EXISTS (
+                                    SELECT 1 FROM order_items i2
+                                    JOIN products p2 ON p2.id=i2.product_id
+                                    WHERE i2.order_id=o.id AND p2.coop_id=?
+                                ) AND NOT EXISTS (
+                                    SELECT 1 FROM order_items i3
+                                    LEFT JOIN products p3 ON p3.id=i3.product_id
+                                    WHERE i3.order_id=o.id AND (p3.id IS NULL OR p3.coop_id<>?)
+                                )
+                                ORDER BY o.id DESC", [$coopId, $coopId]);
+    } elseif ($u['role'] === 'supplier') {
+        $supplierId = (int)($u['supplier_id'] ?? 0);
+        $orders = rows($query . " WHERE EXISTS (
+                                    SELECT 1 FROM order_items i2
+                                    JOIN products p2 ON p2.id=i2.product_id
+                                    JOIN cooperatives c2 ON c2.id=p2.coop_id
+                                    WHERE i2.order_id=o.id AND c2.supplier_id=?
+                                ) AND NOT EXISTS (
+                                    SELECT 1 FROM order_items i3
+                                    LEFT JOIN products p3 ON p3.id=i3.product_id
+                                    LEFT JOIN cooperatives c3 ON c3.id=p3.coop_id
+                                    WHERE i3.order_id=o.id AND (p3.id IS NULL OR c3.id IS NULL OR c3.supplier_id<>?)
+                                )
+                                ORDER BY o.id DESC", [$supplierId, $supplierId]);
     } elseif ($isDriver) {
         $orders = rows($query . " WHERE o.status IN ('approved','assigned','in_transit','delivered') AND (sh.driver_id=? OR sh.driver_id IS NULL) ORDER BY o.id DESC", [(int)$u['id']]);
     } else {
